@@ -229,9 +229,9 @@ FREE_MODELS = [
     {"id": "groq/llama3-70b-8192", "provider": "groq", "model": "llama3-70b-8192", "tier": 1, "timeout": 2},
     {"id": "groq/llama3-3-70b", "provider": "groq", "model": "llama-3.3-70b-versatile", "tier": 1, "timeout": 2},
     {"id": "cerebras/llama3.1-70b", "provider": "cerebras", "model": "llama3.1-70b", "tier": 1, "timeout": 2},
-    {"id": "gemini/gemini-2.5-flash", "provider": "gemini", "model": "gemini-2.5-flash-preview-04-17", "tier": 1, "timeout": 3},
+    {"id": "gemini/gemini-2.5-flash", "provider": "gemini", "model": "gemini-2.0-flash", "tier": 1, "timeout": 3},
     {"id": "deepseek/deepseek-chat", "provider": "deepseek", "model": "deepseek-chat", "tier": 2, "timeout": 4},
-    {"id": "openrouter/llama-3-70b:free", "provider": "openrouter", "model": "meta-llama/llama-3-70b-instruct:free", "tier": 2, "timeout": 4},
+    {"id": "openrouter/llama-3-70b:free", "provider": "openrouter", "model": "meta-llama/llama-3.3-70b-instruct:free", "tier": 2, "timeout": 4},
     {"id": "cohere/command-r", "provider": "cohere", "model": "command-r", "tier": 3, "timeout": 6},
     {"id": "pollinations/text", "provider": "pollinations", "model": "openai", "tier": 4, "timeout": 8},
 ]
@@ -246,14 +246,14 @@ PAID_MODELS = [
     {"id": "cerebras/llama3.1-70b", "provider": "cerebras", "model": "llama3.1-70b", "tier": 1, "timeout": 2},
     {"id": "cerebras/qwen3-235b", "provider": "cerebras", "model": "qwen3-235b", "tier": 1, "timeout": 2},
     {"id": "cerebras/gpt-oss-120b", "provider": "cerebras", "model": "gpt-oss-120b", "tier": 1, "timeout": 2},
-    {"id": "gemini/gemini-2.5-flash", "provider": "gemini", "model": "gemini-2.5-flash-preview-04-17", "tier": 1, "timeout": 3},
+    {"id": "gemini/gemini-2.5-flash", "provider": "gemini", "model": "gemini-2.0-flash", "tier": 1, "timeout": 3},
     {"id": "sambanova/llama3.3-70b", "provider": "sambanova", "model": "Meta-Llama-3.3-70B-Instruct", "tier": 1, "timeout": 2},
     # Tier 2 — Fast (4s timeout)
     {"id": "gemini/gemini-2.5-pro", "provider": "gemini", "model": "gemini-2.5-pro-preview-05-06", "tier": 2, "timeout": 4},
     {"id": "deepseek/deepseek-chat", "provider": "deepseek", "model": "deepseek-chat", "tier": 2, "timeout": 4},
     {"id": "deepseek/deepseek-reasoner", "provider": "deepseek", "model": "deepseek-reasoner", "tier": 2, "timeout": 4},
     {"id": "deepseek/deepseek-coder-v2", "provider": "deepseek", "model": "deepseek-coder", "tier": 2, "timeout": 4},
-    {"id": "openrouter/llama-3-70b:free", "provider": "openrouter", "model": "meta-llama/llama-3-70b-instruct:free", "tier": 2, "timeout": 4},
+    {"id": "openrouter/llama-3-70b:free", "provider": "openrouter", "model": "meta-llama/llama-3.3-70b-instruct:free", "tier": 2, "timeout": 4},
     {"id": "openrouter/qwen3-235b:free", "provider": "openrouter", "model": "qwen/qwen3-235b:free", "tier": 2, "timeout": 4},
     {"id": "openrouter/deepseek-r1:free", "provider": "openrouter", "model": "deepseek/deepseek-r1:free", "tier": 2, "timeout": 4},
     {"id": "openrouter/gemma-3-27b:free", "provider": "openrouter", "model": "google/gemma-3-27b-it:free", "tier": 2, "timeout": 4},
@@ -2920,6 +2920,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from database.connection import get_session
+from database.crud import CRUDManager
 
 logger = logging.getLogger(__name__)
 
@@ -4057,7 +4059,7 @@ class OmegaWeather:
             return cached
 
         try:
-            data = await self._geocode.get("/search", params={"name": city, "count": 5, "language": lang if lang else "en"})
+            data = await self._geocode.get("/search", params={"name": city, "count": 5, "language": "en"})
             if data and data.get("results"):
                 result = data["results"][0]
                 coords = {
@@ -6407,7 +6409,7 @@ router = Router(name="stats")
 
 @router.message(Command("stats"))
 async def cmd_stats(message: Message, lang: str = "en") -> None:
-    if str(message.from_user.id) not in settings.admin_ids:
+    if message.from_user.id not in settings.admin_id_list:
         await message.answer(t("admin_only", lang))
         return
 
@@ -6794,10 +6796,9 @@ async def lifespan(app: FastAPI):
     logger.info("✅ Middlewares registered")
 
     from handlers.ai_chat import process_ai_query
-    @dp.message()
+    @dp.message(lambda m: m.text is not None and not m.text.startswith("/"))
     async def catch_all_messages(message, lang: str = "en"):
-        if message.text and not message.text.startswith("/"):
-            await process_ai_query(message, message.text, lang=lang)
+        await process_ai_query(message, message.text, lang=lang)
 
     if settings.webhook_url:
         await bot.set_webhook(
