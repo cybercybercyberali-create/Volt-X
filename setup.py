@@ -2920,6 +2920,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from database.connection import get_session
+from database.crud import CRUDManager
 
 logger = logging.getLogger(__name__)
 
@@ -4057,7 +4059,7 @@ class OmegaWeather:
             return cached
 
         try:
-            data = await self._geocode.get("/search", params={"name": city, "count": 5, "language": lang if lang else "en"})
+            data = await self._geocode.get("/search", params={"name": city, "count": 5, "language": "en"})
             if data and data.get("results"):
                 result = data["results"][0]
                 coords = {
@@ -5359,7 +5361,7 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command, CommandStart
 
-from config import t, MAIN_MENU_BUTTONS, settings
+from config import t, settings
 from database.connection import get_session
 from database.crud import CRUDManager
 
@@ -6406,7 +6408,7 @@ router = Router(name="stats")
 
 @router.message(Command("stats"))
 async def cmd_stats(message: Message, lang: str = "en") -> None:
-    if str(message.from_user.id) not in settings.admin_ids:
+    if message.from_user.id not in settings.admin_id_list:
         await message.answer(t("admin_only", lang))
         return
 
