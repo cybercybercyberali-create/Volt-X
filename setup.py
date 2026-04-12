@@ -5361,7 +5361,7 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command, CommandStart
 
-from config import t, settings
+from config import t, MENU_LABELS, MENU_LAYOUT, get_menu_label, settings
 from database.connection import get_session
 from database.crud import CRUDManager
 
@@ -6251,7 +6251,8 @@ async def cmd_news(message: Message, lang: str = "en") -> None:
             if article.get("source"):
                 text += f"   📍 {article['source']}\n"
             if article.get("url"):
-                text += f"   🔗 [{t("read_more", lang)}]({article['url']})\n"
+                read_label = t("read_more", lang)
+                text += f"   🔗 [{read_label}]({article['url']})\n"
             text += "\n"
 
         await message.answer(text, parse_mode="Markdown", disable_web_page_preview=True)
