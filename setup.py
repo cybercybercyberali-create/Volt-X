@@ -3898,31 +3898,59 @@ class OmegaFuel:
         return result
 
     async def _scrape_lebanon_fuel(self) -> Optional[dict]:
-        """Scrape Lebanon fuel prices from official sources."""
+        """Scrape Lebanon fuel prices from multiple sources."""
+        import re
+
+        # Source 1: Lebanese Ministry of Energy (try multiple pages)
+        for url in ["https://www.mol.gov.lb/", "https://www.mol.gov.lb/tabid/272/Default.aspx"]:
+            try:
+                html = await self._scraper.fetch_html(url)
+                if html:
+                    from bs4 import BeautifulSoup
+                    soup = BeautifulSoup(html, "lxml")
+                    prices = {}
+                    for table in soup.find_all("table"):
+                        for row in table.find_all("tr"):
+                            cells = [c.get_text(strip=True) for c in row.find_all(["td", "th"])]
+                            if len(cells) < 2 or not cells[0] or len(cells[0]) < 2:
+                                continue
+                            name = cells[0]
+                            for cell_text in cells[1:]:
+                                nums = re.findall(r'[\d]+', cell_text.replace(",", "").replace(".", ""))
+                                for n in nums:
+                                    val = int(n)
+                                    if val >= 1000:  # LBP prices are large integers
+                                        prices[name] = f"{val:,} LBP"
+                                        break
+                    if len(prices) >= 2:
+                        return prices
+            except Exception as exc:
+                logger.debug(f"mol.gov.lb scrape error ({url}): {exc}")
+
+        # Source 2: GlobalPetrolPrices Lebanon page
         try:
-            html = await self._scraper.fetch_html("https://www.mol.gov.lb/")
+            html = await self._scraper.fetch_html("https://www.globalpetrolprices.com/Lebanon/")
             if html:
                 from bs4 import BeautifulSoup
                 soup = BeautifulSoup(html, "lxml")
                 prices = {}
-                tables = soup.find_all("table")
-                for table in tables:
-                    rows = table.find_all("tr")
-                    for row in rows:
-                        cells = row.find_all(["td", "th"])
-                        if len(cells) >= 2:
-                            name = cells[0].get_text(strip=True)
-                            price_text = cells[-1].get_text(strip=True).replace(",", "")
-                            try:
-                                price = float(price_text)
-                                if price > 0:
-                                    prices[name] = price
-                            except ValueError:
-                                continue
+                for row in soup.find_all("tr"):
+                    cells = row.find_all("td")
+                    if len(cells) >= 2:
+                        fuel_name = cells[0].get_text(strip=True)
+                        if not fuel_name or len(fuel_name) < 2:
+                            continue
+                        for cell in cells[1:]:
+                            m = re.search(r'(\d+\.\d+)', cell.get_text(strip=True))
+                            if m:
+                                val = float(m.group(1))
+                                if 0.05 < val < 20.0:
+                                    prices[fuel_name] = f"{val:.3f} USD/L"
+                                    break
                 if prices:
                     return prices
         except Exception as exc:
-            logger.debug(f"Lebanon fuel scrape error: {exc}")
+            logger.debug(f"globalpetrolprices LB error: {exc}")
 
         return None
 
@@ -3933,26 +3961,40 @@ class OmegaFuel:
                 "US": "USA", "GB": "United-Kingdom", "DE": "Germany",
                 "FR": "France", "JP": "Japan", "CN": "China",
                 "IN": "India", "BR": "Brazil", "RU": "Russia",
+                "LB": "Lebanon", "SA": "Saudi-Arabia", "AE": "United-Arab-Emirates",
+                "EG": "Egypt", "KW": "Kuwait", "QA": "Qatar", "BH": "Bahrain",
+                "OM": "Oman", "JO": "Jordan", "IQ": "Iraq", "SY": "Syria",
+                "DZ": "Algeria", "MA": "Morocco", "TN": "Tunisia",
+                "LY": "Libya", "YE": "Yemen", "SD": "Sudan",
+                "TR": "Turkey", "PK": "Pakistan", "NG": "Nigeria",
             }
             country_name = country_map.get(country_code, country_code)
             url = f"https://www.globalpetrolprices.com/{country_name}/gasoline_prices/"
             html = await self._scraper.fetch_html(url)
 
             if html:
+                import re as _re
                 from bs4 import BeautifulSoup
                 soup = BeautifulSoup(html, "lxml")
                 prices = {}
-                graph_data = soup.select(".graph_outside_link, .gasoline_latest, td")
-                for el in graph_data:
-                    text = el.get_text(strip=True)
-                    if any(c.isdigit() for c in text):
-                        try:
-                            price = float(text.replace(",", ".").replace("$", "").strip())
-                            if 0 < price < 100:
-                                prices["gasoline_per_liter"] = price
-                                break
-                        except ValueError:
+                for row in soup.find_all("tr"):
+                    cells = row.find_all("td")
+                    if len(cells) >= 2:
+                        fuel_name = cells[0].get_text(strip=True)
+                        if not fuel_name or len(fuel_name) < 2:
                             continue
+                        for cell in cells[1:]:
+                            text = cell.get_text(strip=True)
+                            m = _re.match(r'^(\d+[\.,]\d+)$', text.strip())
+                            if m:
+                                val_str = m.group(1).replace(",", ".")
+                                try:
+                                    val = float(val_str)
+                                    if 0.05 < val < 20.0:
+                                        prices[fuel_name] = f"{val:.3f} USD/L"
+                                        break
+                                except ValueError:
+                                    continue
 
                 return {
                     "country_code": country_code,
@@ -4081,25 +4123,48 @@ class OmegaWeather:
 
     async def _geocode_city(self, city: str) -> Optional[dict]:
         """Geocode a city name to coordinates."""
-        cache_key = f"geocode:{city.lower()}"
+        # Translate common Arabic city names to English for reliable geocoding
+        _AR_CITIES = {
+            "بيروت": "Beirut", "دمشق": "Damascus", "عمّان": "Amman", "عمان": "Amman",
+            "القاهرة": "Cairo", "الرياض": "Riyadh", "رياض": "Riyadh",
+            "دبي": "Dubai", "أبوظبي": "Abu Dhabi", "ابوظبي": "Abu Dhabi",
+            "الكويت": "Kuwait City", "المنامة": "Manama", "الدوحة": "Doha",
+            "مسقط": "Muscat", "صنعاء": "Sanaa", "بغداد": "Baghdad",
+            "الجزائر": "Algiers", "الدار البيضاء": "Casablanca", "تونس": "Tunis",
+            "طرابلس": "Tripoli", "الخرطوم": "Khartoum", "مقديشو": "Mogadishu",
+            "اسطنبول": "Istanbul", "أنقرة": "Ankara", "انقرة": "Ankara",
+            "لندن": "London", "باريس": "Paris", "برلين": "Berlin",
+            "نيويورك": "New York", "لوس انجلوس": "Los Angeles",
+            "طوكيو": "Tokyo", "بكين": "Beijing", "موسكو": "Moscow",
+            "مدريد": "Madrid", "روما": "Rome", "أمستردام": "Amsterdam",
+            "جنيف": "Geneva", "زيوريخ": "Zurich", "فيينا": "Vienna",
+            "صيدا": "Sidon", "طرابلس لبنان": "Tripoli Lebanon", "زحلة": "Zahle",
+            "حلب": "Aleppo", "حمص": "Homs", "اللاذقية": "Latakia",
+            "الاسكندرية": "Alexandria", "اسكندرية": "Alexandria",
+            "جدة": "Jeddah", "مكة": "Mecca", "المدينة": "Medina",
+            "شارجة": "Sharjah", "عجمان": "Ajman", "الفجيرة": "Fujairah",
+        }
+        city_en = _AR_CITIES.get(city.strip(), city)
+
+        cache_key = f"geocode:{city_en.lower()}"
         cached = await cache.get(cache_key)
         if cached:
             return cached
 
         try:
-            data = await self._geocode.get("/search", params={"name": city, "count": 5, "language": "en"})
+            data = await self._geocode.get("/search", params={"name": city_en, "count": 5, "language": "en"})
             if data and data.get("results"):
                 result = data["results"][0]
                 coords = {
                     "lat": result["latitude"],
                     "lon": result["longitude"],
-                    "name": result.get("name", city),
+                    "name": result.get("name", city_en),
                     "country": result.get("country_code", ""),
                 }
                 await cache.set(cache_key, coords, ttl=86400)
                 return coords
         except Exception as exc:
-            logger.debug(f"Geocode error for {city}: {exc}")
+            logger.debug(f"Geocode error for {city_en}: {exc}")
         return None
 
     async def _fetch_open_meteo(self, lat: float, lon: float, city_name: str, lang: str = "en") -> Optional[dict]:
@@ -6097,6 +6162,71 @@ def _has_kw(text: str, keywords: set) -> bool:
     t_low = text.lower()
     return any(kw in t_low for kw in keywords)
 
+# Arabic/common name → CoinGecko ID
+_CRYPTO_MAP = {
+    "بيتكوين": "bitcoin", "بتكوين": "bitcoin", "bitcoin": "bitcoin", "btc": "bitcoin",
+    "ايثيريوم": "ethereum", "ايثريوم": "ethereum", "اثيريوم": "ethereum",
+    "ethereum": "ethereum", "eth": "ethereum",
+    "ريبل": "ripple", "ripple": "ripple", "xrp": "ripple",
+    "دوجكوين": "dogecoin", "دوج": "dogecoin", "doge": "dogecoin", "dogecoin": "dogecoin",
+    "سولانا": "solana", "solana": "solana", "sol": "solana",
+    "بينانس": "binancecoin", "bnb": "binancecoin",
+    "كاردانو": "cardano", "cardano": "cardano", "ada": "cardano",
+    "تيثر": "tether", "usdt": "tether", "tether": "tether",
+    "دوت": "polkadot", "polkadot": "polkadot", "dot": "polkadot",
+    "شيبا": "shiba-inu", "shib": "shiba-inu",
+    "ليتكوين": "litecoin", "litecoin": "litecoin", "ltc": "litecoin",
+    "اڤالانش": "avalanche-2", "avax": "avalanche-2",
+    "بوليجون": "matic-network", "matic": "matic-network", "polygon": "matic-network",
+    "ترون": "tron", "trx": "tron",
+    "لينك": "chainlink", "chainlink": "chainlink", "link": "chainlink",
+}
+
+# Arabic/common name → stock ticker
+_STOCK_MAP = {
+    "ابل": "AAPL", "آبل": "AAPL", "apple": "AAPL",
+    "مايكروسوفت": "MSFT", "مايكروسوفت": "MSFT", "microsoft": "MSFT",
+    "جوجل": "GOOGL", "google": "GOOGL", "alphabet": "GOOGL",
+    "امازون": "AMZN", "amazon": "AMZN",
+    "تسلا": "TSLA", "tesla": "TSLA",
+    "ميتا": "META", "فيسبوك": "META", "meta": "META", "facebook": "META",
+    "نفليكس": "NFLX", "netflix": "NFLX",
+    "نفيديا": "NVDA", "nvidia": "NVDA",
+    "اوبر": "UBER", "uber": "UBER",
+    "سامسونج": "005930.KS", "samsung": "005930.KS",
+    "سناب": "SNAP", "snapchat": "SNAP",
+    "تويتر": "X", "اكس": "X",
+    "بالانتير": "PLTR", "palantir": "PLTR",
+    "سبوتيفاي": "SPOT", "spotify": "SPOT",
+    "ايرباص": "AIR.PA", "airbus": "AIR.PA",
+    "ارامكو": "2222.SR", "aramco": "2222.SR",
+}
+
+import re as _re
+
+def _extract_crypto(query: str) -> str:
+    """Extract CoinGecko coin ID from natural language query."""
+    q = query.lower().strip()
+    for name, coin_id in _CRYPTO_MAP.items():
+        if name.lower() in q:
+            return coin_id
+    return "bitcoin"
+
+def _extract_stock(query: str) -> Optional[str]:
+    """Extract stock ticker from natural language query."""
+    q = query.lower().strip()
+    for name, ticker in _STOCK_MAP.items():
+        if name.lower() in q:
+            return ticker
+    # Fallback: look for standalone 2-5 uppercase letters in original query
+    for word in query.split():
+        clean = word.strip(".,!?/")
+        if 2 <= len(clean) <= 5 and clean.isalpha() and clean == clean.upper() and clean.isascii():
+            skip = {"USD", "EUR", "GBP", "SAR", "AED", "LBP", "THE", "AND", "FOR"}
+            if clean not in skip:
+                return clean
+    return None
+
 def _extract_city(query: str, default: str = "Beirut") -> str:
     """Extract city name from a natural language weather query."""
     import re
@@ -6181,16 +6311,45 @@ async def _route_to_service(message: Message, query: str, lang: str) -> bool:
             await cmd_fuel(message, lang=lang)
             return True
 
-        # Stocks
+        # Stocks — extract ticker from natural language
         if _has_kw(query, _STOCK_KW):
-            from handlers.stocks import cmd_stock
-            await cmd_stock(message, lang=lang)
+            symbol = _extract_stock(query)
+            if symbol:
+                from api_clients.omega_stocks import omega_stocks
+                await message.answer(t("fetching", lang))
+                data = await omega_stocks.get_quote(symbol)
+                if not data.get("error"):
+                    change_emoji = "📈" if (data.get("change", 0) or 0) >= 0 else "📉"
+                    text = f"📊 **{data.get('name', symbol)} ({data.get('symbol', symbol)})**\n\n"
+                    text += f"{t('label_price', lang)}: ${data.get('price', 0):,.2f}\n"
+                    text += f"{change_emoji} {t('label_change', lang)}: {data.get('change', 0):+,.2f} ({data.get('change_percent', 0):+.2f}%)\n"
+                    if data.get("market_cap"):
+                        text += f"{t('label_mcap', lang)}: ${data['market_cap']:,.0f}\n"
+                    await message.answer(text, parse_mode="Markdown")
+                else:
+                    await message.answer(t("error", lang))
+            else:
+                await message.answer(t("fetching", lang))
+                from handlers.stocks import cmd_stock
+                await cmd_stock(message, lang=lang)
             return True
 
-        # Crypto
+        # Crypto — extract coin from natural language
         if _has_kw(query, _CRYPTO_KW):
-            from handlers.crypto import cmd_crypto
-            await cmd_crypto(message, lang=lang)
+            coin = _extract_crypto(query)
+            from api_clients.omega_crypto import omega_crypto
+            await message.answer(t("fetching", lang))
+            data = await omega_crypto.get_price(coin)
+            if not data.get("error"):
+                emoji = "📈" if (data.get("change_24h") or 0) >= 0 else "📉"
+                text = f"₿ **{data.get('name', coin)} ({data.get('symbol', coin).upper()})**\n\n"
+                text += f"{t('label_price', lang)}: ${data.get('price', 0):,.2f}\n"
+                text += f"{emoji} 24h: {data.get('change_24h', 0):+.2f}%\n"
+                if data.get("market_cap"):
+                    text += f"{t('label_mcap', lang)}: ${data['market_cap']:,.0f}\n"
+                await message.answer(text, parse_mode="Markdown")
+            else:
+                await message.answer(t("error", lang))
             return True
 
         # News
@@ -6299,7 +6458,6 @@ async def cmd_stock(message: Message, lang: str = "en") -> None:
             text += f"{t('label_mcap', lang)}: ${data['market_cap']:,.0f}\n"
         if data.get("pe_ratio"):
             text += f"📐 P/E: {data['pe_ratio']:.2f}\n"
-
 
         await message.answer(text, parse_mode="Markdown")
     except Exception as exc:
