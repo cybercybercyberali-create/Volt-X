@@ -158,7 +158,7 @@ class Settings(BaseSettings):
     render_plan: str = Field(default="free", alias="RENDER_PLAN")
 
     # ━━━ AI Keys ━━━
-    groq_api_key: str = Field(default="", alias="GROQ_API_KEY")
+    groq_api_key: str = Field(default="", alias="GROQ_KEY")
     gemini_api_key: str = Field(default="", alias="GEMINI_API_KEY")
     deepseek_api_key: str = Field(default="", alias="DEEPSEEK_API_KEY")
     cerebras_api_key: str = Field(default="", alias="CEREBRAS_API_KEY")
@@ -170,6 +170,7 @@ class Settings(BaseSettings):
     openweather_api_key: str = Field(default="", alias="OPENWEATHER_API_KEY")
     football_data_key: str = Field(default="", alias="FOOTBALL_DATA_KEY")
     metals_api_key: str = Field(default="", alias="METALS_API_KEY")
+    goldapi_key: str = Field(default="", alias="GOLDAPI_KEY")
     exchange_rate_key: str = Field(default="", alias="EXCHANGE_RATE_KEY")
 
     # ━━━ Optional Keys ━━━
@@ -3513,10 +3514,11 @@ class OmegaMetals:
 
     async def _fetch_goldapi(self, metal: str, currency: str) -> Optional[float]:
         """Fetch from goldapi.io."""
+        api_key = settings.goldapi_key or "goldapi-demo"
         try:
             data = await self._fallback.get(
                 f"https://www.goldapi.io/api/{metal}/{currency}",
-                headers={"x-access-token": "goldapi-demo"},
+                headers={"x-access-token": api_key},
             )
             if data and "price" in data:
                 return data["price"]
@@ -6860,6 +6862,7 @@ notification_worker = NotificationWorker()
 FILES["main.py"] = r'''
 import asyncio
 import logging
+import os
 import sys
 from contextlib import asynccontextmanager
 
@@ -6915,12 +6918,17 @@ async def lifespan(app: FastAPI):
     async def catch_all_messages(message, lang: str = "en"):
         await process_ai_query(message, message.text, lang=lang)
 
-    if settings.webhook_url:
+    # Resolve webhook URL: prefer explicit setting, fallback to Render's auto URL
+    _webhook_url = settings.webhook_url or (
+        os.environ.get("RENDER_EXTERNAL_URL", "") + "/webhook"
+        if os.environ.get("RENDER_EXTERNAL_URL") else ""
+    )
+    if _webhook_url:
         await bot.set_webhook(
-            url=f"{settings.webhook_url}",
+            url=_webhook_url,
             drop_pending_updates=True,
         )
-        logger.info(f"✅ Webhook set: {settings.webhook_url}")
+        logger.info(f"✅ Webhook set: {_webhook_url}")
 
     if IS_FREE:
         asyncio.create_task(_self_ping())
