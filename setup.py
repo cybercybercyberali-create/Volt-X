@@ -6070,34 +6070,66 @@ from database.connection import get_session
 from database.crud import CRUDManager
 
 # ── Smart routing keywords ──────────────────────────────────────
-_GOLD_KW    = {"ذهب", "gold", "فضة", "silver", "بلاتين", "platinum", "معادن", "metals"}
-_WEATHER_KW = {"طقس", "weather", "درجة حرار", "temperature", "مطر", "rain", "جو", "حرارة"}
+_GOLD_KW    = {"ذهب", "gold", "فضة", "silver", "بلاتين", "platinum", "معادن", "metals",
+               "غرام ذهب", "كيلو ذهب", "سعر ذهب", "gold price"}
+_WEATHER_KW = {"طقس", "weather", "درجة حرار", "temperature", "مطر", "rain", "جو", "حرارة",
+               "الطقس", "الجو", "حالة الجو", "كيف الطقس", "شو الطقس"}
 _CURRENCY_KW= {"عملة", "currency", "دولار", "dollar", "يورو", "euro", "صرف", "exchange",
-               "ليرة", "lira", "ريال", "riyal", "درهم", "dirham", "pound", "جنيه"}
-_FUEL_KW    = {"بنزين", "benzin", "fuel", "محروقات", "وقود", "diesel", "ديزل", "petrol"}
-_STOCK_KW   = {"سهم", "اسهم", "stock", "stocks", "بورصة", "nasdaq", "سوق مال"}
-_CRYPTO_KW  = {"بيتكوين", "bitcoin", "كريبتو", "crypto", "ethereum", "ايثريوم", "btc", "eth"}
-_NEWS_KW    = {"اخبار", "خبر", "news", "أخبار"}
+               "ليرة", "lira", "ريال", "riyal", "درهم", "dirham", "pound", "جنيه",
+               "سعر صرف", "exchange rate"}
+_FUEL_KW    = {"بنزين", "benzin", "fuel", "محروقات", "وقود", "diesel", "ديزل", "petrol",
+               "سعر البنزين", "محروقات", "بنزين 95", "بنزين 98"}
+_STOCK_KW   = {"سهم", "اسهم", "stock", "stocks", "بورصة", "nasdaq", "سوق مال", "أسهم"}
+_CRYPTO_KW  = {"بيتكوين", "bitcoin", "كريبتو", "crypto", "ethereum", "ايثريوم", "btc", "eth",
+               "عملات رقمية", "بيتكوين"}
+_NEWS_KW    = {"اخبار", "خبر", "news", "أخبار", "اخر الاخبار", "latest news"}
+
+# Arabic stop words to strip when extracting city from weather query
+_WEATHER_STOP = {
+    "طقس", "الطقس", "جو", "الجو", "حرارة", "الحرارة", "درجة", "درجات", "مطر", "المطر",
+    "الطقس", "حالة", "شو", "كيف", "ما", "هو", "هي", "ايش", "في", "على", "عن", "من",
+    "الى", "إلى", "هل", "اليوم", "هلق", "الآن", "الان", "الان", "بكرا", "الغد", "هناك",
+    "weather", "temperature", "temp", "rain", "raining", "how", "what", "is", "the",
+    "in", "at", "now", "today", "forecast", "هناك", "عندي", "عندنا",
+}
 
 def _has_kw(text: str, keywords: set) -> bool:
     t_low = text.lower()
     return any(kw in t_low for kw in keywords)
 
+def _extract_city(query: str, default: str = "Beirut") -> str:
+    """Extract city name from a natural language weather query."""
+    import re
+    words = re.split(r'[\s،,؟?!.]+', query)
+    city_words = []
+    for w in words:
+        clean = w.strip("؟?!.,:؛\"'")
+        if not clean:
+            continue
+        if clean.lower() in _WEATHER_STOP:
+            continue
+        # Skip pure Arabic particles: ال، في، من، على، عن (2 chars or less)
+        if len(clean) <= 2 and re.search(r'[\u0600-\u06FF]', clean):
+            continue
+        city_words.append(clean)
+    city = " ".join(city_words).strip()
+    return city if len(city) > 1 else default
+
 logger = logging.getLogger(__name__)
 router = Router(name="ai_chat")
 
-SYSTEM_PROMPT = """You are Omega, the smartest AI assistant on Telegram.
+SYSTEM_PROMPT = """You are Omega, a powerful AI assistant on Telegram. You are friendly, direct, and fast.
 
-CRITICAL LANGUAGE RULE:
-- Detect the EXACT language and dialect the user writes in (including regional dialects like Lebanese Arabic, Egyptian Arabic, Mexican Spanish, Brazilian Portuguese, etc.)
-- Reply in the SAME EXACT language and dialect they used
-- If user writes Lebanese Arabic, reply in Lebanese Arabic (not MSA)
-- If user writes Swahili, reply in Swahili
-- If user writes mixed languages, use the dominant one
-- NEVER switch to English unless the user wrote in English
-- Match their tone: casual if casual, formal if formal
+🔴 ABSOLUTE RULE — LANGUAGE:
+- You MUST reply in the EXACT same language the user wrote in. No exceptions.
+- Arabic message → Arabic reply (use their dialect: Lebanese, Egyptian, Gulf, etc.)
+- English message → English reply
+- French message → French reply
+- Mixed message → use the dominant language
+- NEVER reply in English if the user wrote in Arabic or any other language
+- Match their tone exactly: casual stays casual, formal stays formal
 
-Be helpful, accurate, and concise. Use emojis naturally when appropriate."""
+Keep answers short and clear. Use emojis naturally. Be the smartest assistant they've ever used."""
 
 
 @router.message(Command("ai"))
@@ -6120,15 +6152,7 @@ async def _route_to_service(message: Message, query: str, lang: str) -> bool:
 
         # Weather — extract city from query
         if _has_kw(query, _WEATHER_KW):
-            city_text = query
-            for kw in ("طقس", "weather", "درجة حرارة", "درجة الحرارة", "temperature",
-                       "الجو", "جو", "حرارة", "هلق", "الآن", "now", "اليوم", "today",
-                       "شو", "كيف", "ما هو", "what is", "how is", "ايش", "وين", "في",
-                       "مطر", "rain", "هل"):
-                city_text = city_text.replace(kw, " ")
-            city = " ".join(city_text.split()).strip("؟?!.,:")
-            if not city or len(city) < 2:
-                city = "Beirut"
+            city = _extract_city(query, default="Beirut")
             from api_clients.omega_weather import omega_weather
             await message.answer(t("fetching", lang))
             data = await omega_weather.get_weather(city, lang)
@@ -6198,7 +6222,9 @@ async def process_ai_query(message: Message, query: str, lang: str = "en") -> No
 
     try:
         analysis = omega_router.analyze(query)
-        enhanced_prompt = SYSTEM_PROMPT + f"\n\nUser's device language: {lang}. If unsure, prefer this language."
+        lang_names = {"ar": "Arabic", "en": "English", "fr": "French", "tr": "Turkish", "ru": "Russian", "es": "Spanish"}
+        lang_name = lang_names.get(lang, lang)
+        enhanced_prompt = SYSTEM_PROMPT + f"\n\n[SYSTEM: User is writing in {lang_name}. You MUST respond in {lang_name}. Do not use any other language.]"
         responses = await query_engine.query_all(query, system_prompt=enhanced_prompt, analysis=analysis)
 
         if not responses:
