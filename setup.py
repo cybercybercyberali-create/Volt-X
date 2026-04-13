@@ -226,22 +226,21 @@ settings = Settings()
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 FREE_MODELS = [
-    {"id": "groq/llama3-70b-8192", "provider": "groq", "model": "llama3-70b-8192", "tier": 1, "timeout": 2},
-    {"id": "groq/llama3-3-70b", "provider": "groq", "model": "llama-3.3-70b-versatile", "tier": 1, "timeout": 2},
-    {"id": "cerebras/llama3.1-70b", "provider": "cerebras", "model": "llama3.1-70b", "tier": 1, "timeout": 2},
-    {"id": "gemini/gemini-2.5-flash", "provider": "gemini", "model": "gemini-2.0-flash", "tier": 1, "timeout": 3},
-    {"id": "deepseek/deepseek-chat", "provider": "deepseek", "model": "deepseek-chat", "tier": 2, "timeout": 4},
-    {"id": "openrouter/llama-3-70b:free", "provider": "openrouter", "model": "meta-llama/llama-3.3-70b-instruct:free", "tier": 2, "timeout": 4},
-    {"id": "cohere/command-r", "provider": "cohere", "model": "command-r", "tier": 3, "timeout": 6},
-    {"id": "pollinations/text", "provider": "pollinations", "model": "openai", "tier": 4, "timeout": 8},
+    {"id": "groq/llama3-8b-8192", "provider": "groq", "model": "llama3-8b-8192", "tier": 1, "timeout": 10},
+    {"id": "groq/llama3-3-70b", "provider": "groq", "model": "llama-3.3-70b-versatile", "tier": 1, "timeout": 10},
+    {"id": "cerebras/llama3.1-70b", "provider": "cerebras", "model": "llama3.1-70b", "tier": 1, "timeout": 10},
+    {"id": "gemini/gemini-2.0-flash", "provider": "gemini", "model": "gemini-2.0-flash", "tier": 1, "timeout": 12},
+    {"id": "openrouter/llama-3.3-70b:free", "provider": "openrouter", "model": "meta-llama/llama-3.3-70b-instruct:free", "tier": 2, "timeout": 15},
+    {"id": "cohere/command-r", "provider": "cohere", "model": "command-r", "tier": 3, "timeout": 15},
+    {"id": "pollinations/text", "provider": "pollinations", "model": "openai", "tier": 4, "timeout": 25},
 ]
 
 PAID_MODELS = [
     # Tier 1 — Ultra Fast (2s timeout)
-    {"id": "groq/llama3-70b-8192", "provider": "groq", "model": "llama3-70b-8192", "tier": 1, "timeout": 2},
-    {"id": "groq/llama3-3-70b", "provider": "groq", "model": "llama-3.3-70b-versatile", "tier": 1, "timeout": 2},
-    {"id": "groq/llama4-scout", "provider": "groq", "model": "meta-llama/llama-4-scout-17b-16e-instruct", "tier": 1, "timeout": 2},
-    {"id": "groq/mixtral-8x7b-32768", "provider": "groq", "model": "mixtral-8x7b-32768", "tier": 1, "timeout": 2},
+    {"id": "groq/llama3-8b-8192", "provider": "groq", "model": "llama3-8b-8192", "tier": 1, "timeout": 10},
+    {"id": "groq/llama3-3-70b", "provider": "groq", "model": "llama-3.3-70b-versatile", "tier": 1, "timeout": 10},
+    {"id": "groq/llama4-scout", "provider": "groq", "model": "meta-llama/llama-4-scout-17b-16e-instruct", "tier": 1, "timeout": 10},
+    {"id": "groq/mixtral-8x7b-32768", "provider": "groq", "model": "mixtral-8x7b-32768", "tier": 1, "timeout": 10},
     {"id": "groq/kimi-k2", "provider": "groq", "model": "moonshotai/kimi-k2-instruct", "tier": 1, "timeout": 2},
     {"id": "cerebras/llama3.1-70b", "provider": "cerebras", "model": "llama3.1-70b", "tier": 1, "timeout": 2},
     {"id": "cerebras/qwen3-235b", "provider": "cerebras", "model": "qwen3-235b", "tier": 1, "timeout": 2},
@@ -3414,6 +3413,7 @@ class BaseAPIClient:
 '''
 
 FILES["api_clients/omega_metals.py"] = r'''
+import asyncio
 import logging
 import statistics
 from typing import Any, Optional
@@ -3457,6 +3457,11 @@ class OmegaMetals:
         price3 = await self._fetch_metals_live(metal)
         if price3 is not None:
             prices.append({"source": "metals.live", "price": price3})
+
+        if not prices:
+            price4 = await self._fetch_yfinance(metal)
+            if price4 is not None:
+                prices.append({"source": "yfinance", "price": price4})
 
         if not prices:
             stale = await cache.get_stale(cache_key)
@@ -3531,6 +3536,27 @@ class OmegaMetals:
                         return item.get("price")
         except Exception as exc:
             logger.debug(f"metals.live error: {exc}")
+        return None
+
+    async def _fetch_yfinance(self, metal: str) -> Optional[float]:
+        """Fetch from Yahoo Finance via yfinance (free, no key, most reliable)."""
+        metal_ticker_map = {"XAU": "GC=F", "XAG": "SI=F", "XPT": "PL=F", "XPD": "PA=F"}
+        ticker_symbol = metal_ticker_map.get(metal, "GC=F")
+        try:
+            loop = asyncio.get_event_loop()
+            def _sync_fetch():
+                import yfinance as yf
+                t = yf.Ticker(ticker_symbol)
+                price = t.fast_info.last_price
+                return price
+            price = await asyncio.wait_for(
+                loop.run_in_executor(None, _sync_fetch), timeout=15.0
+            )
+            if price and price > 0:
+                logger.debug(f"yfinance {ticker_symbol}: {price}")
+                return float(price)
+        except Exception as exc:
+            logger.debug(f"yfinance error: {exc}")
         return None
 
     def _fuse_prices(self, prices: list[dict]) -> float:
