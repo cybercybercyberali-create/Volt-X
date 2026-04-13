@@ -1,6 +1,9 @@
 name: Render Environment Manager
 
 on:
+  push:
+    paths:
+      - '.github/trigger-env-read'   # push this file to trigger a read
   workflow_dispatch:
     inputs:
       action:
@@ -23,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Read current env vars
-        if: github.event.inputs.action == 'read'
+        if: github.event_name == 'push' || github.event.inputs.action == 'read'
         uses: actions/github-script@v7
         env:
           RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
