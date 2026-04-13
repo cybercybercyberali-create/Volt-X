@@ -6115,7 +6115,9 @@ def register_logo_handlers(dp) -> None:
 
 FILES["handlers/ai_chat.py"] = r'''
 import logging
+import re
 import time
+from typing import Optional
 from aiogram import Router
 from aiogram.types import Message
 from aiogram.filters import Command
@@ -6198,8 +6200,6 @@ _STOCK_MAP = {
     "ارامكو": "2222.SR", "aramco": "2222.SR",
 }
 
-import re as _re
-
 def _extract_crypto(query: str) -> str:
     """Extract CoinGecko coin ID from natural language query."""
     q = query.lower().strip()
@@ -6225,7 +6225,6 @@ def _extract_stock(query: str) -> Optional[str]:
 
 def _extract_city(query: str, default: str = "Beirut") -> str:
     """Extract city name from a natural language weather query."""
-    import re
     words = re.split(r'[\s،,؟?!.]+', query)
     city_words = []
     for w in words:
