@@ -7191,17 +7191,23 @@ async def root():
 
 
 async def _self_ping():
-    """Self-ping every 4 minutes to prevent Render free tier from sleeping."""
+    """Ping the external URL every 4 minutes to prevent Render free tier from sleeping."""
     import httpx
+    await asyncio.sleep(30)  # wait for server to fully start first
     while True:
         try:
-            await asyncio.sleep(240)
-            async with httpx.AsyncClient() as client:
-                port = settings.port
-                await client.get(f"http://127.0.0.1:{port}/health", timeout=5)
-                logger.debug("Self-ping successful")
+            # Use external URL so Render counts it as real traffic
+            external_url = os.environ.get("RENDER_EXTERNAL_URL", "")
+            if external_url:
+                ping_url = f"{external_url}/health"
+            else:
+                ping_url = f"http://127.0.0.1:{settings.port}/health"
+            async with httpx.AsyncClient(timeout=10) as client:
+                await client.get(ping_url)
+                logger.debug(f"Self-ping OK: {ping_url}")
         except Exception:
             pass
+        await asyncio.sleep(240)  # every 4 minutes
 '''
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
