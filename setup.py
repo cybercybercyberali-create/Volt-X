@@ -5598,7 +5598,12 @@ router = Router(name="fuel")
 @router.message(Command("fuel"))
 async def cmd_fuel(message: Message, lang: str = "en") -> None:
     args = message.text.split()[1:] if message.text else []
-    country = args[0].upper() if args else "LB"
+    # Only accept a valid 2-letter country code; ignore natural language words
+    country = "LB"
+    if args:
+        candidate = args[0].upper()
+        if len(candidate) == 2 and candidate.isalpha():
+            country = candidate
 
     await message.answer(t("fetching", lang))
     try:
@@ -6726,6 +6731,16 @@ class UserTrackerMiddleware(BaseMiddleware):
             except Exception as exc:
                 logger.debug(f"User tracker error: {exc}")
                 data["lang"] = device_lang
+
+            # Auto-detect Arabic text: if message contains Arabic chars, override lang to "ar"
+            import re
+            msg_text = ""
+            if isinstance(event, Message) and event.text:
+                msg_text = event.text
+            elif isinstance(event, Message) and event.caption:
+                msg_text = event.caption
+            if msg_text and re.search(r'[\u0600-\u06FF]', msg_text):
+                data["lang"] = "ar"
         else:
             data["lang"] = "en"
 
