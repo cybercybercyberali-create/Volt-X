@@ -102,10 +102,6 @@ services:
     buildCommand: python setup.py && pip install -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
-    disk:
-      name: omega-data
-      mountPath: /data
-      sizeGB: 1
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
