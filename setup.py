@@ -5644,8 +5644,7 @@ router = Router(name="weather")
 async def cmd_weather(message: Message, lang: str = "en") -> None:
     city = message.text.replace("/weather", "").strip() if message.text else ""
     if not city:
-        await message.answer(t("send_city", lang) + " /weather London")
-        return
+        city = "Beirut"  # default to Beirut if no city given
 
     await message.answer(t("fetching", lang))
     try:
@@ -5655,12 +5654,12 @@ async def cmd_weather(message: Message, lang: str = "en") -> None:
             return
 
         text = f"🌤 **{data.get('city', city)}**\n\n"
-        text += f"{t('label_temp', lang)}: {data['temperature']}°C\n"
-        text += f"{t('label_feels', lang)}: {data.get('feels_like', 'N/A')}°C\n"
-        text += f"{t('label_humidity', lang)}: {data.get('humidity', 'N/A')}%\n"
-        text += f"{t('label_wind', lang)}: {data.get('wind_speed', 'N/A')} km/h\n"
-        text += f"📝 {data.get('description', '')}\n"
-
+        text += f"🌡 {t('label_temp', lang)}: {data['temperature']}°C\n"
+        text += f"🤔 {t('label_feels', lang)}: {data.get('feels_like', 'N/A')}°C\n"
+        text += f"💧 {t('label_humidity', lang)}: {data.get('humidity', 'N/A')}%\n"
+        text += f"💨 {t('label_wind', lang)}: {data.get('wind_speed', 'N/A')} km/h\n"
+        if data.get("description"):
+            text += f"📝 {data['description']}\n"
 
         await message.answer(text, parse_mode="Markdown")
     except Exception as exc:
@@ -6063,6 +6062,20 @@ from config import t
 from database.connection import get_session
 from database.crud import CRUDManager
 
+# ── Smart routing keywords ──────────────────────────────────────
+_GOLD_KW    = {"ذهب", "gold", "فضة", "silver", "بلاتين", "platinum", "معادن", "metals"}
+_WEATHER_KW = {"طقس", "weather", "درجة حرار", "temperature", "مطر", "rain", "جو", "حرارة"}
+_CURRENCY_KW= {"عملة", "currency", "دولار", "dollar", "يورو", "euro", "صرف", "exchange",
+               "ليرة", "lira", "ريال", "riyal", "درهم", "dirham", "pound", "جنيه"}
+_FUEL_KW    = {"بنزين", "benzin", "fuel", "محروقات", "وقود", "diesel", "ديزل", "petrol"}
+_STOCK_KW   = {"سهم", "اسهم", "stock", "stocks", "بورصة", "nasdaq", "سوق مال"}
+_CRYPTO_KW  = {"بيتكوين", "bitcoin", "كريبتو", "crypto", "ethereum", "ايثريوم", "btc", "eth"}
+_NEWS_KW    = {"اخبار", "خبر", "news", "أخبار"}
+
+def _has_kw(text: str, keywords: set) -> bool:
+    t_low = text.lower()
+    return any(kw in t_low for kw in keywords)
+
 logger = logging.getLogger(__name__)
 router = Router(name="ai_chat")
 
@@ -6089,12 +6102,88 @@ async def cmd_ai(message: Message, lang: str = "en") -> None:
     await process_ai_query(message, query, lang=lang)
 
 
+async def _route_to_service(message: Message, query: str, lang: str) -> bool:
+    """Try to route natural language query to a specific service. Returns True if handled."""
+    try:
+        # Gold & metals
+        if _has_kw(query, _GOLD_KW):
+            from handlers.gold import cmd_gold
+            await cmd_gold(message, lang=lang)
+            return True
+
+        # Weather — extract city from query
+        if _has_kw(query, _WEATHER_KW):
+            city_text = query
+            for kw in ("طقس", "weather", "درجة حرارة", "درجة الحرارة", "temperature",
+                       "الجو", "جو", "حرارة", "هلق", "الآن", "now", "اليوم", "today",
+                       "شو", "كيف", "ما هو", "what is", "how is", "ايش", "وين", "في",
+                       "مطر", "rain", "هل"):
+                city_text = city_text.replace(kw, " ")
+            city = " ".join(city_text.split()).strip("؟?!.,:")
+            if not city or len(city) < 2:
+                city = "Beirut"
+            from api_clients.omega_weather import omega_weather
+            await message.answer(t("fetching", lang))
+            data = await omega_weather.get_weather(city, lang)
+            if not data.get("error"):
+                text = f"🌤 **{data.get('city', city)}**\n\n"
+                text += f"🌡 {t('label_temp', lang)}: {data['temperature']}°C\n"
+                text += f"🤔 {t('label_feels', lang)}: {data.get('feels_like', 'N/A')}°C\n"
+                text += f"💧 {t('label_humidity', lang)}: {data.get('humidity', 'N/A')}%\n"
+                text += f"💨 {t('label_wind', lang)}: {data.get('wind_speed', 'N/A')} km/h\n"
+                if data.get("description"):
+                    text += f"📝 {data['description']}\n"
+                await message.answer(text, parse_mode="Markdown")
+            else:
+                await message.answer(t("error", lang))
+            return True
+
+        # Currency & exchange rates
+        if _has_kw(query, _CURRENCY_KW):
+            from handlers.currency import cmd_currency
+            await cmd_currency(message, lang=lang)
+            return True
+
+        # Fuel prices
+        if _has_kw(query, _FUEL_KW):
+            from handlers.fuel import cmd_fuel
+            await cmd_fuel(message, lang=lang)
+            return True
+
+        # Stocks
+        if _has_kw(query, _STOCK_KW):
+            from handlers.stocks import cmd_stock
+            await cmd_stock(message, lang=lang)
+            return True
+
+        # Crypto
+        if _has_kw(query, _CRYPTO_KW):
+            from handlers.crypto import cmd_crypto
+            await cmd_crypto(message, lang=lang)
+            return True
+
+        # News
+        if _has_kw(query, _NEWS_KW):
+            from handlers.news import cmd_news
+            await cmd_news(message, lang=lang)
+            return True
+
+    except Exception as exc:
+        logger.debug(f"Service routing failed: {exc}")
+
+    return False
+
+
 async def process_ai_query(message: Message, query: str, lang: str = "en") -> None:
     """Process an AI query through the full Omega pipeline."""
     user_id = message.from_user.id
 
     if not check_user_rate(user_id, "ai_chat"):
         await message.answer(t("rate_limited", lang))
+        return
+
+    # Try smart service routing first (no AI needed)
+    if await _route_to_service(message, query, lang):
         return
 
     await message.answer(t("fetching", lang))
