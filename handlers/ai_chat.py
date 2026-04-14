@@ -173,15 +173,21 @@ async def cmd_ai(message: Message, lang: str = "en") -> None:
 
 async def _route_to_service(message: Message, query: str, lang: str) -> bool:
     """Try to route natural language query to a specific service. Returns True if handled."""
-    try:
-        # Gold & metals
-        if _has_kw(query, _GOLD_KW):
+    # Each block has its own try/except so one failing service doesn't hide others
+    # Gold & metals
+    if _has_kw(query, _GOLD_KW):
+        try:
             from handlers.gold import cmd_gold
             await cmd_gold(message, lang=lang)
             return True
+        except Exception as exc:
+            logger.debug(f"Gold routing error: {exc}")
+            await message.answer(t("error", lang))
+            return True
 
-        # Weather — extract city from query
-        if _has_kw(query, _WEATHER_KW):
+    # Weather — extract city from query
+    if _has_kw(query, _WEATHER_KW):
+        try:
             city = _extract_city(query, default="Beirut")
             from api_clients.omega_weather import omega_weather
             await message.answer(t("fetching", lang))
@@ -198,21 +204,36 @@ async def _route_to_service(message: Message, query: str, lang: str) -> bool:
             else:
                 await message.answer(t("error", lang))
             return True
+        except Exception as exc:
+            logger.debug(f"Weather routing error: {exc}")
+            await message.answer(t("error", lang))
+            return True
 
-        # Currency & exchange rates
-        if _has_kw(query, _CURRENCY_KW):
+    # Currency & exchange rates
+    if _has_kw(query, _CURRENCY_KW):
+        try:
             from handlers.currency import cmd_currency
             await cmd_currency(message, lang=lang)
             return True
+        except Exception as exc:
+            logger.debug(f"Currency routing error: {exc}")
+            await message.answer(t("error", lang))
+            return True
 
-        # Fuel prices
-        if _has_kw(query, _FUEL_KW):
+    # Fuel prices
+    if _has_kw(query, _FUEL_KW):
+        try:
             from handlers.fuel import cmd_fuel
             await cmd_fuel(message, lang=lang)
             return True
+        except Exception as exc:
+            logger.debug(f"Fuel routing error: {exc}")
+            await message.answer(t("error", lang))
+            return True
 
-        # Stocks — extract ticker from natural language
-        if _has_kw(query, _STOCK_KW):
+    # Stocks — extract ticker from natural language
+    if _has_kw(query, _STOCK_KW):
+        try:
             symbol = _extract_stock(query)
             if symbol:
                 from api_clients.omega_stocks import omega_stocks
@@ -233,9 +254,14 @@ async def _route_to_service(message: Message, query: str, lang: str) -> bool:
                 from handlers.stocks import cmd_stock
                 await cmd_stock(message, lang=lang)
             return True
+        except Exception as exc:
+            logger.debug(f"Stocks routing error: {exc}")
+            await message.answer(t("error", lang))
+            return True
 
-        # Crypto — extract coin from natural language
-        if _has_kw(query, _CRYPTO_KW):
+    # Crypto — extract coin from natural language
+    if _has_kw(query, _CRYPTO_KW):
+        try:
             coin = _extract_crypto(query)
             from api_clients.omega_crypto import omega_crypto
             await message.answer(t("fetching", lang))
@@ -251,37 +277,46 @@ async def _route_to_service(message: Message, query: str, lang: str) -> bool:
             else:
                 await message.answer(t("error", lang))
             return True
+        except Exception as exc:
+            logger.debug(f"Crypto routing error: {exc}")
+            await message.answer(t("error", lang))
+            return True
 
-        # News
-        if _has_kw(query, _NEWS_KW):
+    # News
+    if _has_kw(query, _NEWS_KW):
+        try:
             from handlers.news import cmd_news
             await cmd_news(message, lang=lang)
             return True
+        except Exception as exc:
+            logger.debug(f"News routing error: {exc}")
+            await message.answer(t("error", lang))
+            return True
 
-        # Logo generation
-        _LOGO_KW = {"لوغو", "logo", "شعار", "صمم لوغو", "اعمل لوغو", "make logo", "design logo"}
-        if _has_kw(query, _LOGO_KW):
-            import urllib.parse
-            # Extract brand name by removing trigger keywords
+    # Logo generation
+    _LOGO_KW = {"لوغو", "logo", "شعار", "صمم لوغو", "اعمل لوغو", "make logo", "design logo"}
+    if _has_kw(query, _LOGO_KW):
+        try:
             brand = query
             for kw in ("لوغو", "شعار", "logo", "صمم", "اعمل", "make", "design", "لشركة", "لـ", "for", "a logo", "الشركة"):
                 brand = re.sub(re.escape(kw), " ", brand, flags=re.IGNORECASE)
             brand = " ".join(brand.split()).strip("؟?!.,:\"'") or query
             await message.answer(t("logo_generating", lang))
-            try:
-                style_prompt = f"professional minimalist logo for {brand}, flat design, vector style, white background"
-                encoded = urllib.parse.quote(style_prompt)
-                img_url = f"https://image.pollinations.ai/prompt/{encoded}?width=512&height=512&nologo=true"
-                caption = f"🎨 **{brand}**\n\n_AI-generated logo concept_"
-                await message.answer_photo(img_url, caption=caption, parse_mode="Markdown")
-            except Exception:
-                encoded = urllib.parse.quote(f"professional logo {brand} white background")
-                img_url = f"https://image.pollinations.ai/prompt/{encoded}?width=512&height=512"
-                await message.answer(f"🎨 **{brand}**\n\n[View logo]({img_url})", parse_mode="Markdown")
+            style_prompt = f"professional minimalist logo for {brand}, flat design, vector style, white background"
+            encoded = urllib.parse.quote(style_prompt)
+            img_url = f"https://image.pollinations.ai/prompt/{encoded}?width=512&height=512&nologo=true"
+            caption = f"🎨 **{brand}**\n\n_AI-generated logo concept_"
+            await message.answer_photo(img_url, caption=caption, parse_mode="Markdown")
             return True
-
-    except Exception as exc:
-        logger.debug(f"Service routing failed: {exc}")
+        except Exception as exc:
+            logger.debug(f"Logo routing error: {exc}")
+            try:
+                encoded = urllib.parse.quote(f"professional logo {query} white background")
+                img_url = f"https://image.pollinations.ai/prompt/{encoded}?width=512&height=512"
+                await message.answer(f"🎨 **{query}**\n\n[View logo]({img_url})", parse_mode="Markdown")
+            except Exception:
+                await message.answer(t("error", lang))
+            return True
 
     return False
 

@@ -219,24 +219,31 @@ class OmegaFuel:
                 from bs4 import BeautifulSoup
                 soup = BeautifulSoup(html, "lxml")
                 prices = {}
+                # Only accept rows whose first cell looks like a fuel type name
+                _SKIP_ROWS = {
+                    "correlation", "flexibility", "index", "tax", "vat", "subsidy",
+                    "margin", "volatility", "trend", "rank", "rate", "change", "percent",
+                }
                 for row in soup.find_all("tr"):
                     cells = row.find_all("td")
-                    if len(cells) >= 2:
-                        fuel_name = cells[0].get_text(strip=True)
-                        if not fuel_name or len(fuel_name) < 2:
-                            continue
-                        for cell in cells[1:]:
-                            text = cell.get_text(strip=True)
-                            m = _re.match(r'^(\d+[\.,]\d+)$', text.strip())
-                            if m:
-                                val_str = m.group(1).replace(",", ".")
-                                try:
-                                    val = float(val_str)
-                                    if 0.05 < val < 20.0:
-                                        prices[fuel_name] = f"{val:.3f} USD/L"
-                                        break
-                                except ValueError:
-                                    continue
+                    if len(cells) < 2:
+                        continue
+                    fuel_name = cells[0].get_text(strip=True)
+                    if not fuel_name or len(fuel_name) < 2:
+                        continue
+                    # Skip non-price metadata rows
+                    if any(skip in fuel_name.lower() for skip in _SKIP_ROWS):
+                        continue
+                    # Only accept the FIRST numeric cell per row (current price)
+                    first_cell_text = cells[1].get_text(strip=True) if len(cells) > 1 else ""
+                    m = _re.match(r'^(\d+\.\d{2,4})$', first_cell_text.strip())
+                    if m:
+                        try:
+                            val = float(m.group(1))
+                            if 0.1 < val < 5.0:  # sane USD/L range
+                                prices[fuel_name] = f"{val:.3f} USD/L"
+                        except ValueError:
+                            pass
 
                 return {
                     "country_code": country_code,

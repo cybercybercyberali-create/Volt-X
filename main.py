@@ -52,7 +52,11 @@ async def lifespan(app: FastAPI):
     logger.info("✅ Middlewares registered")
 
     from handlers.ai_chat import process_ai_query
-    @dp.message(lambda m: m.text is not None and not m.text.startswith("/"))
+    from aiogram.filters import StateFilter
+    from aiogram.fsm.state import default_state
+
+    # Only fire when NO FSM state is active — prevents intercepting CV/other FSM flows
+    @dp.message(StateFilter(default_state), lambda m: m.text is not None and not m.text.startswith("/"))
     async def catch_all_messages(message, lang: str = "en"):
         await process_ai_query(message, message.text, lang=lang)
 

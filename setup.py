@@ -4029,24 +4029,31 @@ class OmegaFuel:
                 from bs4 import BeautifulSoup
                 soup = BeautifulSoup(html, "lxml")
                 prices = {}
+                # Only accept rows whose first cell looks like a fuel type name
+                _SKIP_ROWS = {
+                    "correlation", "flexibility", "index", "tax", "vat", "subsidy",
+                    "margin", "volatility", "trend", "rank", "rate", "change", "percent",
+                }
                 for row in soup.find_all("tr"):
                     cells = row.find_all("td")
-                    if len(cells) >= 2:
-                        fuel_name = cells[0].get_text(strip=True)
-                        if not fuel_name or len(fuel_name) < 2:
-                            continue
-                        for cell in cells[1:]:
-                            text = cell.get_text(strip=True)
-                            m = _re.match(r'^(\d+[\.,]\d+)$', text.strip())
-                            if m:
-                                val_str = m.group(1).replace(",", ".")
-                                try:
-                                    val = float(val_str)
-                                    if 0.05 < val < 20.0:
-                                        prices[fuel_name] = f"{val:.3f} USD/L"
-                                        break
-                                except ValueError:
-                                    continue
+                    if len(cells) < 2:
+                        continue
+                    fuel_name = cells[0].get_text(strip=True)
+                    if not fuel_name or len(fuel_name) < 2:
+                        continue
+                    # Skip non-price metadata rows
+                    if any(skip in fuel_name.lower() for skip in _SKIP_ROWS):
+                        continue
+                    # Only accept the FIRST numeric cell per row (current price)
+                    first_cell_text = cells[1].get_text(strip=True) if len(cells) > 1 else ""
+                    m = _re.match(r'^(\d+\.\d{2,4})$', first_cell_text.strip())
+                    if m:
+                        try:
+                            val = float(m.group(1))
+                            if 0.1 < val < 5.0:  # sane USD/L range
+                                prices[fuel_name] = f"{val:.3f} USD/L"
+                        except ValueError:
+                            pass
 
                 return {
                     "country_code": country_code,
@@ -5072,6 +5079,7 @@ class OmegaNews:
         if cached:
             return cached
 
+        result = None  # initialise before conditional branches
         # Limited APIs first (auto-restore when quota renews)
         if quota.has_quota("newsapi"):
             result = await self._fetch_newsapi(category, country)
@@ -5153,15 +5161,20 @@ class OmegaNews:
         return None
 
     async def _fetch_rss(self, lang: str) -> Optional[dict]:
-        """Fetch from RSS feeds as fallback."""
+        """Fetch from RSS feeds as fallback. Uses xml.etree for correct XML parsing."""
+        import xml.etree.ElementTree as ET
+        import html as html_mod
+
         feeds = {
             "en": [
                 "https://feeds.bbci.co.uk/news/rss.xml",
-                "http://feeds.reuters.com/reuters/topNews",
+                "https://feeds.reuters.com/reuters/topNews",
+                "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml",
             ],
             "ar": [
                 "https://www.aljazeera.net/aljazeerarss/a7c186be-1baa-4bd4-9d80-a84db769f779/73d0e1b4-532f-45ef-b135-bfdff8b8cab9",
                 "https://www.bbc.com/arabic/rss.xml",
+                "https://arabic.rt.com/rss/",
             ],
         }
 
@@ -5170,19 +5183,46 @@ class OmegaNews:
 
         for url in rss_urls:
             try:
-                html = await self._rss.fetch_html(url)
-                if html:
-                    from bs4 import BeautifulSoup
-                    soup = BeautifulSoup(html, "lxml")
-                    items = soup.find_all("item")[:10]
-                    for item in items:
-                        articles.append({
-                            "title": item.find("title").get_text(strip=True) if item.find("title") else "",
-                            "description": item.find("description").get_text(strip=True)[:200] if item.find("description") else "",
-                            "url": item.find("link").get_text(strip=True) if item.find("link") else "",
-                            "source": "RSS",
-                            "published_at": item.find("pubDate").get_text(strip=True) if item.find("pubDate") else "",
-                        })
+                raw = await self._rss.fetch_html(url)
+                if not raw or len(raw) < 200:
+                    continue
+
+                # Strip any BOM or XML declaration that may confuse ET
+                raw_clean = raw.strip()
+                if raw_clean.startswith('\ufeff'):
+                    raw_clean = raw_clean[1:]
+
+                # Parse as proper XML
+                root = ET.fromstring(raw_clean)
+                # RSS items can be at channel/item or directly at item
+                items = root.findall('.//item')[:10]
+                for item in items:
+                    def _text(tag):
+                        el = item.find(tag)
+                        if el is None:
+                            return ""
+                        txt = (el.text or "").strip()
+                        # Unwrap CDATA if present
+                        return html_mod.unescape(txt)
+
+                    title = _text("title")
+                    if not title:
+                        continue
+                    link = _text("link")
+                    # link may be in a different namespace or as text after <link/>
+                    if not link:
+                        link_el = item.find("link")
+                        if link_el is not None:
+                            link = (link_el.tail or "").strip()
+                    articles.append({
+                        "title": title[:120],
+                        "description": _text("description")[:200],
+                        "url": link,
+                        "source": "RSS",
+                        "published_at": _text("pubDate"),
+                    })
+                if articles:
+                    break  # got enough from first working feed
             except Exception as exc:
                 logger.debug(f"RSS error for {url}: {exc}")
 
@@ -6367,15 +6407,21 @@ async def cmd_ai(message: Message, lang: str = "en") -> None:
 
 async def _route_to_service(message: Message, query: str, lang: str) -> bool:
     """Try to route natural language query to a specific service. Returns True if handled."""
-    try:
-        # Gold & metals
-        if _has_kw(query, _GOLD_KW):
+    # Each block has its own try/except so one failing service doesn't hide others
+    # Gold & metals
+    if _has_kw(query, _GOLD_KW):
+        try:
             from handlers.gold import cmd_gold
             await cmd_gold(message, lang=lang)
             return True
+        except Exception as exc:
+            logger.debug(f"Gold routing error: {exc}")
+            await message.answer(t("error", lang))
+            return True
 
-        # Weather — extract city from query
-        if _has_kw(query, _WEATHER_KW):
+    # Weather — extract city from query
+    if _has_kw(query, _WEATHER_KW):
+        try:
             city = _extract_city(query, default="Beirut")
             from api_clients.omega_weather import omega_weather
             await message.answer(t("fetching", lang))
@@ -6392,21 +6438,36 @@ async def _route_to_service(message: Message, query: str, lang: str) -> bool:
             else:
                 await message.answer(t("error", lang))
             return True
+        except Exception as exc:
+            logger.debug(f"Weather routing error: {exc}")
+            await message.answer(t("error", lang))
+            return True
 
-        # Currency & exchange rates
-        if _has_kw(query, _CURRENCY_KW):
+    # Currency & exchange rates
+    if _has_kw(query, _CURRENCY_KW):
+        try:
             from handlers.currency import cmd_currency
             await cmd_currency(message, lang=lang)
             return True
+        except Exception as exc:
+            logger.debug(f"Currency routing error: {exc}")
+            await message.answer(t("error", lang))
+            return True
 
-        # Fuel prices
-        if _has_kw(query, _FUEL_KW):
+    # Fuel prices
+    if _has_kw(query, _FUEL_KW):
+        try:
             from handlers.fuel import cmd_fuel
             await cmd_fuel(message, lang=lang)
             return True
+        except Exception as exc:
+            logger.debug(f"Fuel routing error: {exc}")
+            await message.answer(t("error", lang))
+            return True
 
-        # Stocks — extract ticker from natural language
-        if _has_kw(query, _STOCK_KW):
+    # Stocks — extract ticker from natural language
+    if _has_kw(query, _STOCK_KW):
+        try:
             symbol = _extract_stock(query)
             if symbol:
                 from api_clients.omega_stocks import omega_stocks
@@ -6427,9 +6488,14 @@ async def _route_to_service(message: Message, query: str, lang: str) -> bool:
                 from handlers.stocks import cmd_stock
                 await cmd_stock(message, lang=lang)
             return True
+        except Exception as exc:
+            logger.debug(f"Stocks routing error: {exc}")
+            await message.answer(t("error", lang))
+            return True
 
-        # Crypto — extract coin from natural language
-        if _has_kw(query, _CRYPTO_KW):
+    # Crypto — extract coin from natural language
+    if _has_kw(query, _CRYPTO_KW):
+        try:
             coin = _extract_crypto(query)
             from api_clients.omega_crypto import omega_crypto
             await message.answer(t("fetching", lang))
@@ -6445,37 +6511,46 @@ async def _route_to_service(message: Message, query: str, lang: str) -> bool:
             else:
                 await message.answer(t("error", lang))
             return True
+        except Exception as exc:
+            logger.debug(f"Crypto routing error: {exc}")
+            await message.answer(t("error", lang))
+            return True
 
-        # News
-        if _has_kw(query, _NEWS_KW):
+    # News
+    if _has_kw(query, _NEWS_KW):
+        try:
             from handlers.news import cmd_news
             await cmd_news(message, lang=lang)
             return True
+        except Exception as exc:
+            logger.debug(f"News routing error: {exc}")
+            await message.answer(t("error", lang))
+            return True
 
-        # Logo generation
-        _LOGO_KW = {"لوغو", "logo", "شعار", "صمم لوغو", "اعمل لوغو", "make logo", "design logo"}
-        if _has_kw(query, _LOGO_KW):
-            import urllib.parse
-            # Extract brand name by removing trigger keywords
+    # Logo generation
+    _LOGO_KW = {"لوغو", "logo", "شعار", "صمم لوغو", "اعمل لوغو", "make logo", "design logo"}
+    if _has_kw(query, _LOGO_KW):
+        try:
             brand = query
             for kw in ("لوغو", "شعار", "logo", "صمم", "اعمل", "make", "design", "لشركة", "لـ", "for", "a logo", "الشركة"):
                 brand = re.sub(re.escape(kw), " ", brand, flags=re.IGNORECASE)
             brand = " ".join(brand.split()).strip("؟?!.,:\"'") or query
             await message.answer(t("logo_generating", lang))
-            try:
-                style_prompt = f"professional minimalist logo for {brand}, flat design, vector style, white background"
-                encoded = urllib.parse.quote(style_prompt)
-                img_url = f"https://image.pollinations.ai/prompt/{encoded}?width=512&height=512&nologo=true"
-                caption = f"🎨 **{brand}**\n\n_AI-generated logo concept_"
-                await message.answer_photo(img_url, caption=caption, parse_mode="Markdown")
-            except Exception:
-                encoded = urllib.parse.quote(f"professional logo {brand} white background")
-                img_url = f"https://image.pollinations.ai/prompt/{encoded}?width=512&height=512"
-                await message.answer(f"🎨 **{brand}**\n\n[View logo]({img_url})", parse_mode="Markdown")
+            style_prompt = f"professional minimalist logo for {brand}, flat design, vector style, white background"
+            encoded = urllib.parse.quote(style_prompt)
+            img_url = f"https://image.pollinations.ai/prompt/{encoded}?width=512&height=512&nologo=true"
+            caption = f"🎨 **{brand}**\n\n_AI-generated logo concept_"
+            await message.answer_photo(img_url, caption=caption, parse_mode="Markdown")
             return True
-
-    except Exception as exc:
-        logger.debug(f"Service routing failed: {exc}")
+        except Exception as exc:
+            logger.debug(f"Logo routing error: {exc}")
+            try:
+                encoded = urllib.parse.quote(f"professional logo {query} white background")
+                img_url = f"https://image.pollinations.ai/prompt/{encoded}?width=512&height=512"
+                await message.answer(f"🎨 **{query}**\n\n[View logo]({img_url})", parse_mode="Markdown")
+            except Exception:
+                await message.answer(t("error", lang))
+            return True
 
     return False
 
@@ -7238,7 +7313,11 @@ async def lifespan(app: FastAPI):
     logger.info("✅ Middlewares registered")
 
     from handlers.ai_chat import process_ai_query
-    @dp.message(lambda m: m.text is not None and not m.text.startswith("/"))
+    from aiogram.filters import StateFilter
+    from aiogram.fsm.state import default_state
+
+    # Only fire when NO FSM state is active — prevents intercepting CV/other FSM flows
+    @dp.message(StateFilter(default_state), lambda m: m.text is not None and not m.text.startswith("/"))
     async def catch_all_messages(message, lang: str = "en"):
         await process_ai_query(message, message.text, lang=lang)
 
