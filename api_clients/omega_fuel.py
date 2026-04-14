@@ -87,6 +87,33 @@ class OmegaFuel:
         """Scrape Lebanon fuel prices from multiple sources."""
         import re
 
+        # Source 0: IPT Group (most reliable — official weekly prices)
+        try:
+            for url in ["https://www.iptgroup.com.lb/ipt/e", "https://iptgroup.com.lb/ipt/e"]:
+                html = await self._scraper.fetch_html(url)
+                if not html:
+                    continue
+                text = html
+                prices = {}
+                # Match patterns: "UNL 95   2,376,000 L.L." or "Diesel  2,442,000 L.L."
+                patterns = [
+                    (r'UNL\s*95[^\d]*([\d,]+)\s*L\.?L\.?', 'بنزين 95 أوكتان'),
+                    (r'UNL\s*98[^\d]*([\d,]+)\s*L\.?L\.?', 'بنزين 98 أوكتان'),
+                    (r'Diesel[^\d]*([\d,]+)\s*L\.?L\.?', 'ديزل'),
+                    (r'Gas\s*\(?LPG\)?[^\d]*([\d,]+)\s*L\.?L\.?', 'غاز LPG'),
+                    (r'Kerosene[^\d]*([\d,]+)\s*L\.?L\.?', 'كيروسين'),
+                ]
+                for pattern, label in patterns:
+                    m = re.search(pattern, text, re.IGNORECASE)
+                    if m:
+                        val = int(m.group(1).replace(",", ""))
+                        if val > 100000:
+                            prices[label] = f"{val:,} ل.ل."
+                if len(prices) >= 2:
+                    return prices
+        except Exception as exc:
+            logger.debug(f"iptgroup.com.lb error: {exc}")
+
         # Source 1: Lebanese Ministry of Energy (try multiple pages)
         for url in ["https://www.mol.gov.lb/", "https://www.mol.gov.lb/tabid/272/Default.aspx"]:
             try:

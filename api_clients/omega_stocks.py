@@ -40,33 +40,42 @@ class OmegaStocks:
         return result or {"error": True, "symbol": symbol, "message": "Quote unavailable"}
 
     async def _fetch_yfinance(self, symbol: str) -> Optional[dict]:
-        """Fetch from yfinance."""
+        """Fetch stock data using yfinance fast_info (reliable, no key needed)."""
         try:
             import yfinance as yf
             import asyncio
-            loop = asyncio.get_event_loop()
-            ticker = yf.Ticker(symbol)
-            info = await loop.run_in_executor(None, lambda: ticker.info)
 
-            if info and info.get("regularMarketPrice"):
+            def _sync_fetch():
+                ticker = yf.Ticker(symbol)
+                fi = ticker.fast_info
+                price = fi.last_price
+                # fallback to recent history if fast_info fails
+                if not price or price <= 0:
+                    hist = ticker.history(period="2d")
+                    if not hist.empty:
+                        price = float(hist["Close"].iloc[-1])
+                    else:
+                        return None
+                prev = getattr(fi, "previous_close", None) or price
+                change = price - prev
+                change_pct = (change / prev * 100) if prev else 0
+                mcap = getattr(fi, "market_cap", 0) or 0
                 return {
                     "symbol": symbol.upper(),
-                    "name": info.get("shortName", symbol),
-                    "price": info.get("regularMarketPrice", 0),
-                    "change": info.get("regularMarketChange", 0),
-                    "change_percent": info.get("regularMarketChangePercent", 0),
-                    "high": info.get("dayHigh", 0),
-                    "low": info.get("dayLow", 0),
-                    "volume": info.get("volume", 0),
-                    "market_cap": info.get("marketCap", 0),
-                    "pe_ratio": info.get("trailingPE"),
-                    "52w_high": info.get("fiftyTwoWeekHigh", 0),
-                    "52w_low": info.get("fiftyTwoWeekLow", 0),
-                    "currency": info.get("currency", "USD"),
-                    "exchange": info.get("exchange", ""),
+                    "name": symbol.upper(),
+                    "price": float(price),
+                    "change": float(change),
+                    "change_percent": float(change_pct),
+                    "market_cap": float(mcap),
                     "source": "yfinance",
                     "error": False,
                 }
+
+            loop = asyncio.get_event_loop()
+            result = await asyncio.wait_for(
+                loop.run_in_executor(None, _sync_fetch), timeout=25.0
+            )
+            return result
         except Exception as exc:
             logger.debug(f"yfinance error for {symbol}: {exc}")
         return None

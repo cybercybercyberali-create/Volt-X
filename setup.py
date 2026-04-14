@@ -3897,6 +3897,33 @@ class OmegaFuel:
         """Scrape Lebanon fuel prices from multiple sources."""
         import re
 
+        # Source 0: IPT Group (most reliable — official weekly prices)
+        try:
+            for url in ["https://www.iptgroup.com.lb/ipt/e", "https://iptgroup.com.lb/ipt/e"]:
+                html = await self._scraper.fetch_html(url)
+                if not html:
+                    continue
+                text = html
+                prices = {}
+                # Match patterns: "UNL 95   2,376,000 L.L." or "Diesel  2,442,000 L.L."
+                patterns = [
+                    (r'UNL\s*95[^\d]*([\d,]+)\s*L\.?L\.?', 'بنزين 95 أوكتان'),
+                    (r'UNL\s*98[^\d]*([\d,]+)\s*L\.?L\.?', 'بنزين 98 أوكتان'),
+                    (r'Diesel[^\d]*([\d,]+)\s*L\.?L\.?', 'ديزل'),
+                    (r'Gas\s*\(?LPG\)?[^\d]*([\d,]+)\s*L\.?L\.?', 'غاز LPG'),
+                    (r'Kerosene[^\d]*([\d,]+)\s*L\.?L\.?', 'كيروسين'),
+                ]
+                for pattern, label in patterns:
+                    m = re.search(pattern, text, re.IGNORECASE)
+                    if m:
+                        val = int(m.group(1).replace(",", ""))
+                        if val > 100000:
+                            prices[label] = f"{val:,} ل.ل."
+                if len(prices) >= 2:
+                    return prices
+        except Exception as exc:
+            logger.debug(f"iptgroup.com.lb error: {exc}")
+
         # Source 1: Lebanese Ministry of Energy (try multiple pages)
         for url in ["https://www.mol.gov.lb/", "https://www.mol.gov.lb/tabid/272/Default.aspx"]:
             try:
@@ -4785,33 +4812,42 @@ class OmegaStocks:
         return result or {"error": True, "symbol": symbol, "message": "Quote unavailable"}
 
     async def _fetch_yfinance(self, symbol: str) -> Optional[dict]:
-        """Fetch from yfinance."""
+        """Fetch stock data using yfinance fast_info (reliable, no key needed)."""
         try:
             import yfinance as yf
             import asyncio
-            loop = asyncio.get_event_loop()
-            ticker = yf.Ticker(symbol)
-            info = await loop.run_in_executor(None, lambda: ticker.info)
 
-            if info and info.get("regularMarketPrice"):
+            def _sync_fetch():
+                ticker = yf.Ticker(symbol)
+                fi = ticker.fast_info
+                price = fi.last_price
+                # fallback to recent history if fast_info fails
+                if not price or price <= 0:
+                    hist = ticker.history(period="2d")
+                    if not hist.empty:
+                        price = float(hist["Close"].iloc[-1])
+                    else:
+                        return None
+                prev = getattr(fi, "previous_close", None) or price
+                change = price - prev
+                change_pct = (change / prev * 100) if prev else 0
+                mcap = getattr(fi, "market_cap", 0) or 0
                 return {
                     "symbol": symbol.upper(),
-                    "name": info.get("shortName", symbol),
-                    "price": info.get("regularMarketPrice", 0),
-                    "change": info.get("regularMarketChange", 0),
-                    "change_percent": info.get("regularMarketChangePercent", 0),
-                    "high": info.get("dayHigh", 0),
-                    "low": info.get("dayLow", 0),
-                    "volume": info.get("volume", 0),
-                    "market_cap": info.get("marketCap", 0),
-                    "pe_ratio": info.get("trailingPE"),
-                    "52w_high": info.get("fiftyTwoWeekHigh", 0),
-                    "52w_low": info.get("fiftyTwoWeekLow", 0),
-                    "currency": info.get("currency", "USD"),
-                    "exchange": info.get("exchange", ""),
+                    "name": symbol.upper(),
+                    "price": float(price),
+                    "change": float(change),
+                    "change_percent": float(change_pct),
+                    "market_cap": float(mcap),
                     "source": "yfinance",
                     "error": False,
                 }
+
+            loop = asyncio.get_event_loop()
+            result = await asyncio.wait_for(
+                loop.run_in_executor(None, _sync_fetch), timeout=25.0
+            )
+            return result
         except Exception as exc:
             logger.debug(f"yfinance error for {symbol}: {exc}")
         return None
@@ -6118,6 +6154,7 @@ import logging
 import re
 import time
 from typing import Optional
+from collections import defaultdict
 from aiogram import Router
 from aiogram.types import Message
 from aiogram.filters import Command
@@ -6256,6 +6293,25 @@ SYSTEM_PROMPT = """You are Omega, a powerful AI assistant on Telegram. You are f
 
 Keep answers short and clear. Use emojis naturally. Be the smartest assistant they've ever used."""
 
+# ── Per-user conversation memory (in-process, max 8 messages) ──
+_USER_HISTORY: dict = defaultdict(list)
+_MAX_HIST = 8
+
+def _history_add(uid: int, role: str, text: str) -> None:
+    _USER_HISTORY[uid].append({"role": role, "content": text[:400]})
+    if len(_USER_HISTORY[uid]) > _MAX_HIST:
+        _USER_HISTORY[uid] = _USER_HISTORY[uid][-_MAX_HIST:]
+
+def _history_get(uid: int) -> str:
+    msgs = _USER_HISTORY.get(uid, [])
+    if not msgs:
+        return ""
+    lines = []
+    for m in msgs:
+        prefix = "User" if m["role"] == "user" else "Assistant"
+        lines.append(f"{prefix}: {m['content']}")
+    return "\n".join(lines)
+
 
 @router.message(Command("ai"))
 async def cmd_ai(message: Message, lang: str = "en") -> None:
@@ -6379,7 +6435,12 @@ async def process_ai_query(message: Message, query: str, lang: str = "en") -> No
         lang_names = {"ar": "Arabic", "en": "English", "fr": "French", "tr": "Turkish", "ru": "Russian", "es": "Spanish"}
         lang_name = lang_names.get(lang, lang)
         enhanced_prompt = SYSTEM_PROMPT + f"\n\n[SYSTEM: User is writing in {lang_name}. You MUST respond in {lang_name}. Do not use any other language.]"
-        responses = await query_engine.query_all(query, system_prompt=enhanced_prompt, analysis=analysis)
+
+        # Build query with conversation history for context
+        history_text = _history_get(user_id)
+        query_with_ctx = f"{history_text}\nUser: {query}" if history_text else query
+
+        responses = await query_engine.query_all(query_with_ctx, system_prompt=enhanced_prompt, analysis=analysis)
 
         if not responses:
             await message.answer(t("error", lang))
@@ -6395,6 +6456,10 @@ async def process_ai_query(message: Message, query: str, lang: str = "en") -> No
             text = text[:4000] + "..."
 
         await message.answer(text, parse_mode="Markdown")
+
+        # Save to in-memory conversation history
+        _history_add(user_id, "user", query)
+        _history_add(user_id, "assistant", text[:300])
 
         try:
             async with get_session() as session:

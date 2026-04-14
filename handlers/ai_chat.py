@@ -2,6 +2,7 @@ import logging
 import re
 import time
 from typing import Optional
+from collections import defaultdict
 from aiogram import Router
 from aiogram.types import Message
 from aiogram.filters import Command
@@ -140,6 +141,25 @@ SYSTEM_PROMPT = """You are Omega, a powerful AI assistant on Telegram. You are f
 
 Keep answers short and clear. Use emojis naturally. Be the smartest assistant they've ever used."""
 
+# ── Per-user conversation memory (in-process, max 8 messages) ──
+_USER_HISTORY: dict = defaultdict(list)
+_MAX_HIST = 8
+
+def _history_add(uid: int, role: str, text: str) -> None:
+    _USER_HISTORY[uid].append({"role": role, "content": text[:400]})
+    if len(_USER_HISTORY[uid]) > _MAX_HIST:
+        _USER_HISTORY[uid] = _USER_HISTORY[uid][-_MAX_HIST:]
+
+def _history_get(uid: int) -> str:
+    msgs = _USER_HISTORY.get(uid, [])
+    if not msgs:
+        return ""
+    lines = []
+    for m in msgs:
+        prefix = "User" if m["role"] == "user" else "Assistant"
+        lines.append(f"{prefix}: {m['content']}")
+    return "\n".join(lines)
+
 
 @router.message(Command("ai"))
 async def cmd_ai(message: Message, lang: str = "en") -> None:
@@ -263,7 +283,12 @@ async def process_ai_query(message: Message, query: str, lang: str = "en") -> No
         lang_names = {"ar": "Arabic", "en": "English", "fr": "French", "tr": "Turkish", "ru": "Russian", "es": "Spanish"}
         lang_name = lang_names.get(lang, lang)
         enhanced_prompt = SYSTEM_PROMPT + f"\n\n[SYSTEM: User is writing in {lang_name}. You MUST respond in {lang_name}. Do not use any other language.]"
-        responses = await query_engine.query_all(query, system_prompt=enhanced_prompt, analysis=analysis)
+
+        # Build query with conversation history for context
+        history_text = _history_get(user_id)
+        query_with_ctx = f"{history_text}\nUser: {query}" if history_text else query
+
+        responses = await query_engine.query_all(query_with_ctx, system_prompt=enhanced_prompt, analysis=analysis)
 
         if not responses:
             await message.answer(t("error", lang))
@@ -279,6 +304,10 @@ async def process_ai_query(message: Message, query: str, lang: str = "en") -> No
             text = text[:4000] + "..."
 
         await message.answer(text, parse_mode="Markdown")
+
+        # Save to in-memory conversation history
+        _history_add(user_id, "user", query)
+        _history_add(user_id, "assistant", text[:300])
 
         try:
             async with get_session() as session:
