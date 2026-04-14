@@ -86,65 +86,94 @@ class OmegaFuel:
     async def _scrape_lebanon_fuel(self) -> Optional[dict]:
         """Scrape Lebanon fuel prices from multiple sources."""
         import re
+        from bs4 import BeautifulSoup
 
-        # Source 0: IPT Group (most reliable — official weekly prices)
-        try:
-            for url in ["https://www.iptgroup.com.lb/ipt/e", "https://iptgroup.com.lb/ipt/e"]:
-                html = await self._scraper.fetch_html(url)
-                if not html:
+        # Helper: extract LBP price numbers >100,000 from HTML text
+        def _extract_llp_prices(html_text: str) -> dict:
+            prices = {}
+            patterns = [
+                (r'UNL\s*95[\s\S]{0,40}?([\d,]{7,})\s*(?:L\.?L\.?|ل\.?ل\.?|LBP|LL)', 'بنزين 95'),
+                (r'UNL\s*98[\s\S]{0,40}?([\d,]{7,})\s*(?:L\.?L\.?|ل\.?ل\.?|LBP|LL)', 'بنزين 98'),
+                (r'Diesel[\s\S]{0,40}?([\d,]{7,})\s*(?:L\.?L\.?|ل\.?ل\.?|LBP|LL)', 'ديزل'),
+                (r'Gas\s*(?:Oil|\(LPG\)|LPG)?[\s\S]{0,40}?([\d,]{7,})\s*(?:L\.?L\.?|ل\.?ل\.?|LBP|LL)', 'غاز'),
+                (r'Kerosene[\s\S]{0,40}?([\d,]{7,})\s*(?:L\.?L\.?|ل\.?ل\.?|LBP|LL)', 'كيروسين'),
+                (r'(?:بنزين|Benzine)\s*95[\s\S]{0,40}?([\d,]{7,})', 'بنزين 95'),
+                (r'(?:بنزين|Benzine)\s*98[\s\S]{0,40}?([\d,]{7,})', 'بنزين 98'),
+                (r'(?:ديزل|مازوت|Mazout)[\s\S]{0,40}?([\d,]{7,})', 'ديزل'),
+            ]
+            for pattern, label in patterns:
+                if label in prices:
                     continue
-                text = html
-                prices = {}
-                # Match patterns: "UNL 95   2,376,000 L.L." or "Diesel  2,442,000 L.L."
-                patterns = [
-                    (r'UNL\s*95[^\d]*([\d,]+)\s*L\.?L\.?', 'بنزين 95 أوكتان'),
-                    (r'UNL\s*98[^\d]*([\d,]+)\s*L\.?L\.?', 'بنزين 98 أوكتان'),
-                    (r'Diesel[^\d]*([\d,]+)\s*L\.?L\.?', 'ديزل'),
-                    (r'Gas\s*\(?LPG\)?[^\d]*([\d,]+)\s*L\.?L\.?', 'غاز LPG'),
-                    (r'Kerosene[^\d]*([\d,]+)\s*L\.?L\.?', 'كيروسين'),
-                ]
-                for pattern, label in patterns:
-                    m = re.search(pattern, text, re.IGNORECASE)
-                    if m:
-                        val = int(m.group(1).replace(",", ""))
-                        if val > 100000:
+                m = re.search(pattern, html_text, re.IGNORECASE)
+                if m:
+                    val_str = m.group(1).replace(",", "")
+                    try:
+                        val = int(val_str)
+                        if val > 100_000:
                             prices[label] = f"{val:,} ل.ل."
-                if len(prices) >= 2:
-                    return prices
-        except Exception as exc:
-            logger.debug(f"iptgroup.com.lb error: {exc}")
+                    except ValueError:
+                        pass
+            return prices
 
-        # Source 1: Lebanese Ministry of Energy (try multiple pages)
-        for url in ["https://www.mol.gov.lb/", "https://www.mol.gov.lb/tabid/272/Default.aspx"]:
+        # Source 0: IPT Group — try multiple URL variants
+        ipt_urls = [
+            "https://www.iptgroup.com.lb/ipt/e",
+            "https://iptgroup.com.lb/ipt/e",
+            "https://www.iptgroup.com.lb/",
+            "https://iptgroup.com.lb/",
+        ]
+        for url in ipt_urls:
             try:
                 html = await self._scraper.fetch_html(url)
-                if html:
-                    from bs4 import BeautifulSoup
+                if not html or len(html) < 500:
+                    continue
+                # Strip HTML tags for regex matching
+                plain = re.sub(r'<[^>]+>', ' ', html)
+                prices = _extract_llp_prices(plain)
+                if len(prices) >= 2:
+                    logger.info(f"IPT fuel prices from {url}: {prices}")
+                    return prices
+                # Also try raw HTML in case values are in attributes
+                prices = _extract_llp_prices(html)
+                if len(prices) >= 2:
+                    return prices
+            except Exception as exc:
+                logger.debug(f"iptgroup {url} error: {exc}")
+
+        # Source 1: Lebanese Ministry of Energy
+        for url in ["https://www.mol.gov.lb/tabid/272/Default.aspx", "https://www.mol.gov.lb/"]:
+            try:
+                html = await self._scraper.fetch_html(url)
+                if html and len(html) > 500:
                     soup = BeautifulSoup(html, "lxml")
-                    prices = {}
+                    plain = soup.get_text(" ")
+                    prices = _extract_llp_prices(plain)
+                    if len(prices) >= 2:
+                        return prices
+                    # Try table parsing
+                    prices_tbl = {}
                     for table in soup.find_all("table"):
                         for row in table.find_all("tr"):
                             cells = [c.get_text(strip=True) for c in row.find_all(["td", "th"])]
-                            if len(cells) < 2 or not cells[0] or len(cells[0]) < 2:
+                            if len(cells) < 2:
                                 continue
                             name = cells[0]
                             for cell_text in cells[1:]:
-                                nums = re.findall(r'[\d]+', cell_text.replace(",", "").replace(".", ""))
+                                nums = re.findall(r'\d[\d,]{5,}', cell_text)
                                 for n in nums:
-                                    val = int(n)
-                                    if val >= 1000:  # LBP prices are large integers
-                                        prices[name] = f"{val:,} LBP"
+                                    val = int(n.replace(",", ""))
+                                    if val > 100_000:
+                                        prices_tbl[name] = f"{val:,} ل.ل."
                                         break
-                    if len(prices) >= 2:
-                        return prices
+                    if len(prices_tbl) >= 2:
+                        return prices_tbl
             except Exception as exc:
-                logger.debug(f"mol.gov.lb scrape error ({url}): {exc}")
+                logger.debug(f"mol.gov.lb error ({url}): {exc}")
 
-        # Source 2: GlobalPetrolPrices Lebanon page
+        # Source 2: GlobalPetrolPrices Lebanon (shows USD/L)
         try:
-            html = await self._scraper.fetch_html("https://www.globalpetrolprices.com/Lebanon/")
+            html = await self._scraper.fetch_html("https://www.globalpetrolprices.com/Lebanon/gasoline_prices/")
             if html:
-                from bs4 import BeautifulSoup
                 soup = BeautifulSoup(html, "lxml")
                 prices = {}
                 for row in soup.find_all("tr"):

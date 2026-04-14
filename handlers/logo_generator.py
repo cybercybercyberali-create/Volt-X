@@ -1,11 +1,11 @@
 import logging
+import asyncio
+import urllib.parse
 from aiogram import Router
 from aiogram.types import Message
 from aiogram.filters import Command
 
 from config import t
-
-from services.omega_image import omega_image
 
 logger = logging.getLogger(__name__)
 router = Router(name="logo")
@@ -23,20 +23,33 @@ async def cmd_logo(message: Message, lang: str = "en") -> None:
 
     await message.answer(t("logo_generating", lang))
     try:
-        from services.omega_query_engine import query_engine
+        # Use Pollinations.ai for real AI image generation (free, no auth needed)
+        styles = [
+            f"professional minimalist logo for {query}, flat design, vector style, white background",
+            f"modern creative logo {query}, gradient colors, clean typography, transparent background",
+            f"corporate logo design {query}, geometric shapes, blue and gold, professional",
+        ]
 
-        lang_instruction = f"Respond in {lang} language." if lang != "en" else ""
-        prompt = f"Create a professional logo concept description for a company called '{query}'. Describe the visual elements, colors, and style. {lang_instruction}"
-        responses = await query_engine.query_all(prompt, system_prompt="You are a professional graphic designer.")
-        description = responses[0]["text"] if responses else f"Modern logo for {query}"
+        sent = False
+        for style_prompt in styles:
+            try:
+                encoded = urllib.parse.quote(style_prompt)
+                img_url = f"https://image.pollinations.ai/prompt/{encoded}?width=512&height=512&nologo=true"
+                caption = f"🎨 **{query}**\n\n_AI-generated logo concept_"
+                await message.answer_photo(img_url, caption=caption, parse_mode="Markdown")
+                sent = True
+                break
+            except Exception:
+                continue
 
-        urls = await omega_image.search_logos(query)
-        text = f"🎨 **{query}**\n\n"
-        text += f"📝 {description[:400]}\n\n"
-        for i, url in enumerate(urls, 1):
-            text += f"{i}. [#{i}]({url})\n"
-
-        await message.answer(text, parse_mode="Markdown")
+        if not sent:
+            # Fallback: send link
+            encoded = urllib.parse.quote(f"professional logo {query} white background flat design")
+            img_url = f"https://image.pollinations.ai/prompt/{encoded}?width=512&height=512"
+            await message.answer(
+                f"🎨 **{query}**\n\n[View AI logo]({img_url})",
+                parse_mode="Markdown"
+            )
     except Exception as exc:
         logger.error(f"Logo error: {exc}", exc_info=True)
         await message.answer(t("error", lang))

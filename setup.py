@@ -3896,65 +3896,94 @@ class OmegaFuel:
     async def _scrape_lebanon_fuel(self) -> Optional[dict]:
         """Scrape Lebanon fuel prices from multiple sources."""
         import re
+        from bs4 import BeautifulSoup
 
-        # Source 0: IPT Group (most reliable — official weekly prices)
-        try:
-            for url in ["https://www.iptgroup.com.lb/ipt/e", "https://iptgroup.com.lb/ipt/e"]:
-                html = await self._scraper.fetch_html(url)
-                if not html:
+        # Helper: extract LBP price numbers >100,000 from HTML text
+        def _extract_llp_prices(html_text: str) -> dict:
+            prices = {}
+            patterns = [
+                (r'UNL\s*95[\s\S]{0,40}?([\d,]{7,})\s*(?:L\.?L\.?|ل\.?ل\.?|LBP|LL)', 'بنزين 95'),
+                (r'UNL\s*98[\s\S]{0,40}?([\d,]{7,})\s*(?:L\.?L\.?|ل\.?ل\.?|LBP|LL)', 'بنزين 98'),
+                (r'Diesel[\s\S]{0,40}?([\d,]{7,})\s*(?:L\.?L\.?|ل\.?ل\.?|LBP|LL)', 'ديزل'),
+                (r'Gas\s*(?:Oil|\(LPG\)|LPG)?[\s\S]{0,40}?([\d,]{7,})\s*(?:L\.?L\.?|ل\.?ل\.?|LBP|LL)', 'غاز'),
+                (r'Kerosene[\s\S]{0,40}?([\d,]{7,})\s*(?:L\.?L\.?|ل\.?ل\.?|LBP|LL)', 'كيروسين'),
+                (r'(?:بنزين|Benzine)\s*95[\s\S]{0,40}?([\d,]{7,})', 'بنزين 95'),
+                (r'(?:بنزين|Benzine)\s*98[\s\S]{0,40}?([\d,]{7,})', 'بنزين 98'),
+                (r'(?:ديزل|مازوت|Mazout)[\s\S]{0,40}?([\d,]{7,})', 'ديزل'),
+            ]
+            for pattern, label in patterns:
+                if label in prices:
                     continue
-                text = html
-                prices = {}
-                # Match patterns: "UNL 95   2,376,000 L.L." or "Diesel  2,442,000 L.L."
-                patterns = [
-                    (r'UNL\s*95[^\d]*([\d,]+)\s*L\.?L\.?', 'بنزين 95 أوكتان'),
-                    (r'UNL\s*98[^\d]*([\d,]+)\s*L\.?L\.?', 'بنزين 98 أوكتان'),
-                    (r'Diesel[^\d]*([\d,]+)\s*L\.?L\.?', 'ديزل'),
-                    (r'Gas\s*\(?LPG\)?[^\d]*([\d,]+)\s*L\.?L\.?', 'غاز LPG'),
-                    (r'Kerosene[^\d]*([\d,]+)\s*L\.?L\.?', 'كيروسين'),
-                ]
-                for pattern, label in patterns:
-                    m = re.search(pattern, text, re.IGNORECASE)
-                    if m:
-                        val = int(m.group(1).replace(",", ""))
-                        if val > 100000:
+                m = re.search(pattern, html_text, re.IGNORECASE)
+                if m:
+                    val_str = m.group(1).replace(",", "")
+                    try:
+                        val = int(val_str)
+                        if val > 100_000:
                             prices[label] = f"{val:,} ل.ل."
-                if len(prices) >= 2:
-                    return prices
-        except Exception as exc:
-            logger.debug(f"iptgroup.com.lb error: {exc}")
+                    except ValueError:
+                        pass
+            return prices
 
-        # Source 1: Lebanese Ministry of Energy (try multiple pages)
-        for url in ["https://www.mol.gov.lb/", "https://www.mol.gov.lb/tabid/272/Default.aspx"]:
+        # Source 0: IPT Group — try multiple URL variants
+        ipt_urls = [
+            "https://www.iptgroup.com.lb/ipt/e",
+            "https://iptgroup.com.lb/ipt/e",
+            "https://www.iptgroup.com.lb/",
+            "https://iptgroup.com.lb/",
+        ]
+        for url in ipt_urls:
             try:
                 html = await self._scraper.fetch_html(url)
-                if html:
-                    from bs4 import BeautifulSoup
+                if not html or len(html) < 500:
+                    continue
+                # Strip HTML tags for regex matching
+                plain = re.sub(r'<[^>]+>', ' ', html)
+                prices = _extract_llp_prices(plain)
+                if len(prices) >= 2:
+                    logger.info(f"IPT fuel prices from {url}: {prices}")
+                    return prices
+                # Also try raw HTML in case values are in attributes
+                prices = _extract_llp_prices(html)
+                if len(prices) >= 2:
+                    return prices
+            except Exception as exc:
+                logger.debug(f"iptgroup {url} error: {exc}")
+
+        # Source 1: Lebanese Ministry of Energy
+        for url in ["https://www.mol.gov.lb/tabid/272/Default.aspx", "https://www.mol.gov.lb/"]:
+            try:
+                html = await self._scraper.fetch_html(url)
+                if html and len(html) > 500:
                     soup = BeautifulSoup(html, "lxml")
-                    prices = {}
+                    plain = soup.get_text(" ")
+                    prices = _extract_llp_prices(plain)
+                    if len(prices) >= 2:
+                        return prices
+                    # Try table parsing
+                    prices_tbl = {}
                     for table in soup.find_all("table"):
                         for row in table.find_all("tr"):
                             cells = [c.get_text(strip=True) for c in row.find_all(["td", "th"])]
-                            if len(cells) < 2 or not cells[0] or len(cells[0]) < 2:
+                            if len(cells) < 2:
                                 continue
                             name = cells[0]
                             for cell_text in cells[1:]:
-                                nums = re.findall(r'[\d]+', cell_text.replace(",", "").replace(".", ""))
+                                nums = re.findall(r'\d[\d,]{5,}', cell_text)
                                 for n in nums:
-                                    val = int(n)
-                                    if val >= 1000:  # LBP prices are large integers
-                                        prices[name] = f"{val:,} LBP"
+                                    val = int(n.replace(",", ""))
+                                    if val > 100_000:
+                                        prices_tbl[name] = f"{val:,} ل.ل."
                                         break
-                    if len(prices) >= 2:
-                        return prices
+                    if len(prices_tbl) >= 2:
+                        return prices_tbl
             except Exception as exc:
-                logger.debug(f"mol.gov.lb scrape error ({url}): {exc}")
+                logger.debug(f"mol.gov.lb error ({url}): {exc}")
 
-        # Source 2: GlobalPetrolPrices Lebanon page
+        # Source 2: GlobalPetrolPrices Lebanon (shows USD/L)
         try:
-            html = await self._scraper.fetch_html("https://www.globalpetrolprices.com/Lebanon/")
+            html = await self._scraper.fetch_html("https://www.globalpetrolprices.com/Lebanon/gasoline_prices/")
             if html:
-                from bs4 import BeautifulSoup
                 soup = BeautifulSoup(html, "lxml")
                 prices = {}
                 for row in soup.find_all("tr"):
@@ -6102,13 +6131,13 @@ def register_cv_handlers(dp) -> None:
 
 FILES["handlers/logo_generator.py"] = r'''
 import logging
+import asyncio
+import urllib.parse
 from aiogram import Router
 from aiogram.types import Message
 from aiogram.filters import Command
 
 from config import t
-
-from services.omega_image import omega_image
 
 logger = logging.getLogger(__name__)
 router = Router(name="logo")
@@ -6126,20 +6155,33 @@ async def cmd_logo(message: Message, lang: str = "en") -> None:
 
     await message.answer(t("logo_generating", lang))
     try:
-        from services.omega_query_engine import query_engine
+        # Use Pollinations.ai for real AI image generation (free, no auth needed)
+        styles = [
+            f"professional minimalist logo for {query}, flat design, vector style, white background",
+            f"modern creative logo {query}, gradient colors, clean typography, transparent background",
+            f"corporate logo design {query}, geometric shapes, blue and gold, professional",
+        ]
 
-        lang_instruction = f"Respond in {lang} language." if lang != "en" else ""
-        prompt = f"Create a professional logo concept description for a company called '{query}'. Describe the visual elements, colors, and style. {lang_instruction}"
-        responses = await query_engine.query_all(prompt, system_prompt="You are a professional graphic designer.")
-        description = responses[0]["text"] if responses else f"Modern logo for {query}"
+        sent = False
+        for style_prompt in styles:
+            try:
+                encoded = urllib.parse.quote(style_prompt)
+                img_url = f"https://image.pollinations.ai/prompt/{encoded}?width=512&height=512&nologo=true"
+                caption = f"🎨 **{query}**\n\n_AI-generated logo concept_"
+                await message.answer_photo(img_url, caption=caption, parse_mode="Markdown")
+                sent = True
+                break
+            except Exception:
+                continue
 
-        urls = await omega_image.search_logos(query)
-        text = f"🎨 **{query}**\n\n"
-        text += f"📝 {description[:400]}\n\n"
-        for i, url in enumerate(urls, 1):
-            text += f"{i}. [#{i}]({url})\n"
-
-        await message.answer(text, parse_mode="Markdown")
+        if not sent:
+            # Fallback: send link
+            encoded = urllib.parse.quote(f"professional logo {query} white background flat design")
+            img_url = f"https://image.pollinations.ai/prompt/{encoded}?width=512&height=512"
+            await message.answer(
+                f"🎨 **{query}**\n\n[View AI logo]({img_url})",
+                parse_mode="Markdown"
+            )
     except Exception as exc:
         logger.error(f"Logo error: {exc}", exc_info=True)
         await message.answer(t("error", lang))
@@ -6153,6 +6195,7 @@ FILES["handlers/ai_chat.py"] = r'''
 import logging
 import re
 import time
+import urllib.parse
 from typing import Optional
 from collections import defaultdict
 from aiogram import Router
@@ -6407,6 +6450,28 @@ async def _route_to_service(message: Message, query: str, lang: str) -> bool:
         if _has_kw(query, _NEWS_KW):
             from handlers.news import cmd_news
             await cmd_news(message, lang=lang)
+            return True
+
+        # Logo generation
+        _LOGO_KW = {"لوغو", "logo", "شعار", "صمم لوغو", "اعمل لوغو", "make logo", "design logo"}
+        if _has_kw(query, _LOGO_KW):
+            import urllib.parse
+            # Extract brand name by removing trigger keywords
+            brand = query
+            for kw in ("لوغو", "شعار", "logo", "صمم", "اعمل", "make", "design", "لشركة", "لـ", "for", "a logo", "الشركة"):
+                brand = re.sub(re.escape(kw), " ", brand, flags=re.IGNORECASE)
+            brand = " ".join(brand.split()).strip("؟?!.,:\"'") or query
+            await message.answer(t("logo_generating", lang))
+            try:
+                style_prompt = f"professional minimalist logo for {brand}, flat design, vector style, white background"
+                encoded = urllib.parse.quote(style_prompt)
+                img_url = f"https://image.pollinations.ai/prompt/{encoded}?width=512&height=512&nologo=true"
+                caption = f"🎨 **{brand}**\n\n_AI-generated logo concept_"
+                await message.answer_photo(img_url, caption=caption, parse_mode="Markdown")
+            except Exception:
+                encoded = urllib.parse.quote(f"professional logo {brand} white background")
+                img_url = f"https://image.pollinations.ai/prompt/{encoded}?width=512&height=512"
+                await message.answer(f"🎨 **{brand}**\n\n[View logo]({img_url})", parse_mode="Markdown")
             return True
 
     except Exception as exc:

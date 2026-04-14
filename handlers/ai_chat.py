@@ -1,6 +1,7 @@
 import logging
 import re
 import time
+import urllib.parse
 from typing import Optional
 from collections import defaultdict
 from aiogram import Router
@@ -255,6 +256,28 @@ async def _route_to_service(message: Message, query: str, lang: str) -> bool:
         if _has_kw(query, _NEWS_KW):
             from handlers.news import cmd_news
             await cmd_news(message, lang=lang)
+            return True
+
+        # Logo generation
+        _LOGO_KW = {"لوغو", "logo", "شعار", "صمم لوغو", "اعمل لوغو", "make logo", "design logo"}
+        if _has_kw(query, _LOGO_KW):
+            import urllib.parse
+            # Extract brand name by removing trigger keywords
+            brand = query
+            for kw in ("لوغو", "شعار", "logo", "صمم", "اعمل", "make", "design", "لشركة", "لـ", "for", "a logo", "الشركة"):
+                brand = re.sub(re.escape(kw), " ", brand, flags=re.IGNORECASE)
+            brand = " ".join(brand.split()).strip("؟?!.,:\"'") or query
+            await message.answer(t("logo_generating", lang))
+            try:
+                style_prompt = f"professional minimalist logo for {brand}, flat design, vector style, white background"
+                encoded = urllib.parse.quote(style_prompt)
+                img_url = f"https://image.pollinations.ai/prompt/{encoded}?width=512&height=512&nologo=true"
+                caption = f"🎨 **{brand}**\n\n_AI-generated logo concept_"
+                await message.answer_photo(img_url, caption=caption, parse_mode="Markdown")
+            except Exception:
+                encoded = urllib.parse.quote(f"professional logo {brand} white background")
+                img_url = f"https://image.pollinations.ai/prompt/{encoded}?width=512&height=512"
+                await message.answer(f"🎨 **{brand}**\n\n[View logo]({img_url})", parse_mode="Markdown")
             return True
 
     except Exception as exc:
