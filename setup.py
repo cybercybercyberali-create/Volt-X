@@ -3073,6 +3073,344 @@ class OmegaLearning:
 omega_learning = OmegaLearning()
 '''
 
+FILES["services/cards.py"] = r'''
+"""Visual card formatters for all Omega Bot services.
+
+Each function returns a Markdown-formatted string with emojis and bold prices.
+All functions accept a `lang` parameter ("ar" | "en").
+"""
+from datetime import datetime
+from typing import Optional
+
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+
+def _sep() -> str:
+    return "━━━━━━━━━━━━━━"
+
+
+def _dir(lang: str) -> str:
+    """Return RLM prefix for Arabic text in Telegram."""
+    return "\u200F" if lang == "ar" else ""
+
+
+# ── fuel card ────────────────────────────────────────────────────────────────
+
+def fuel_card(
+    prices_llp: dict,
+    rate: float,
+    lang: str,
+    source: str,
+    ago: str,
+) -> str:
+    """Format Lebanon fuel prices card.
+
+    prices_llp: dict keyed by Arabic fuel name → "XXX,XXX ل.ل." strings.
+    rate: LBP per 1 USD (e.g. 89700).
+    lang: "ar" or "en".
+    source: source label string.
+    ago: human-readable age string like "5 دقائق" or "5 minutes".
+    """
+    import re
+
+    def _parse_llp(val: str) -> Optional[float]:
+        """Extract numeric LBP value from string."""
+        m = re.search(r"([\d,]+)", str(val))
+        if m:
+            try:
+                return float(m.group(1).replace(",", ""))
+            except ValueError:
+                pass
+        return None
+
+    def _usd_20l(llp_price: float) -> str:
+        if rate and rate > 0:
+            usd = llp_price / rate
+            usd_l = usd / 20
+            return f"{usd:.2f}$ / 20L  →  {usd_l:.2f}$ / L"
+        return "N/A"
+
+    def _usd_10kg(llp_price: float) -> str:
+        if rate and rate > 0:
+            usd = llp_price / rate
+            return f"{usd:.2f}$"
+        return "N/A"
+
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    if lang == "ar":
+        title = "⛽ *أسعار المحروقات — لبنان* 🇱🇧"
+        date_line = f"📅 {today}"
+        rate_line = f"💱 سعر الصرف: 1$ = {rate:,.0f} ل.ل." if rate else "💱 سعر الصرف: غير متاح"
+        footer = f"🔄 منذ {ago} | {source}"
+
+        lines = [title, date_line, ""]
+
+        # Benzin 98
+        key98 = next((k for k in prices_llp if "98" in k), None)
+        val98 = _parse_llp(prices_llp[key98]) if key98 else None
+        lines.append(f"• 🔵 بنزين 98:  {_usd_20l(val98) if val98 else 'غير متاح'}")
+
+        # Benzin 95
+        key95 = next((k for k in prices_llp if "95" in k), None)
+        val95 = _parse_llp(prices_llp[key95]) if key95 else None
+        lines.append(f"• 🔵 بنزين 95:  {_usd_20l(val95) if val95 else 'غير متاح'}")
+
+        # Diesel
+        keyd = next((k for k in prices_llp if "ديزل" in k or "diesel" in k.lower() or "مازوت" in k), None)
+        vald = _parse_llp(prices_llp[keyd]) if keyd else None
+        lines.append(f"• ⚫ ديزل:      {_usd_20l(vald) if vald else 'غير متاح'}")
+
+        # Gas 10kg
+        keyg = next((k for k in prices_llp if "غاز" in k or "gas" in k.lower()), None)
+        valg = _parse_llp(prices_llp[keyg]) if keyg else None
+        lines.append(f"• 🟠 غاز (10kg): {_usd_10kg(valg) if valg else 'غير متاح'}")
+
+        lines.extend(["", rate_line, footer])
+    else:
+        title = "⛽ *Lebanon Fuel Prices* 🇱🇧"
+        date_line = f"📅 {today}"
+        rate_line = f"💱 Exchange Rate: 1$ = {rate:,.0f} LBP" if rate else "💱 Exchange Rate: unavailable"
+        footer = f"🔄 {ago} ago | {source}"
+
+        lines = [title, date_line, ""]
+
+        key98 = next((k for k in prices_llp if "98" in k), None)
+        val98 = _parse_llp(prices_llp[key98]) if key98 else None
+        lines.append(f"• 🔵 Benzin 98:  {_usd_20l(val98) if val98 else 'N/A'}")
+
+        key95 = next((k for k in prices_llp if "95" in k), None)
+        val95 = _parse_llp(prices_llp[key95]) if key95 else None
+        lines.append(f"• 🔵 Benzin 95:  {_usd_20l(val95) if val95 else 'N/A'}")
+
+        keyd = next((k for k in prices_llp if "ديزل" in k or "diesel" in k.lower() or "مازوت" in k), None)
+        vald = _parse_llp(prices_llp[keyd]) if keyd else None
+        lines.append(f"• ⚫ Diesel:      {_usd_20l(vald) if vald else 'N/A'}")
+
+        keyg = next((k for k in prices_llp if "غاز" in k or "gas" in k.lower()), None)
+        valg = _parse_llp(prices_llp[keyg]) if keyg else None
+        lines.append(f"• 🟠 Gas (10kg):  {_usd_10kg(valg) if valg else 'N/A'}")
+
+        lines.extend(["", rate_line, footer])
+
+    return "\n".join(lines)
+
+
+# ── weather card ─────────────────────────────────────────────────────────────
+
+def weather_card(data: dict, lang: str) -> str:
+    """Format weather data into a visual card."""
+    city = data.get("city", "")
+    country = data.get("country", "")
+    temp = data.get("temperature", "N/A")
+    feels = data.get("feels_like", "N/A")
+    humidity = data.get("humidity", "N/A")
+    wind = data.get("wind_speed", "N/A")
+    wind_dir = data.get("wind_direction", "")
+    sunrise = data.get("sunrise", "")
+    sunset = data.get("sunset", "")
+    description = data.get("description", "")
+
+    sep = _sep()
+
+    if lang == "ar":
+        location = f"{city}, {country}" if country else city
+        lines = [
+            f"🌤 *{location}*",
+            sep,
+            f"🌡 درجة الحرارة: **{temp}°C** (يُحسّ كـ {feels}°C)",
+            f"💧 الرطوبة: **{humidity}%**",
+            f"💨 الرياح: **{wind} كم/س** {wind_dir}",
+        ]
+        if sunrise and sunset:
+            lines.append(f"🌅 الشروق: {sunrise} | الغروب: {sunset}")
+        if description:
+            lines.append(f"📊 الحالة: {description}")
+    else:
+        location = f"{city}, {country}" if country else city
+        lines = [
+            f"🌤 *{location}*",
+            sep,
+            f"🌡 Temperature: **{temp}°C** (feels like {feels}°C)",
+            f"💧 Humidity: **{humidity}%**",
+            f"💨 Wind: **{wind} km/h** {wind_dir}",
+        ]
+        if sunrise and sunset:
+            lines.append(f"🌅 Sunrise: {sunrise} | Sunset: {sunset}")
+        if description:
+            lines.append(f"📊 Condition: {description}")
+
+    return "\n".join(lines)
+
+
+# ── gold card ─────────────────────────────────────────────────────────────────
+
+def gold_card(data: dict, lang: str) -> str:
+    """Format precious metals prices into a visual card."""
+    sep = _sep()
+    xau = data.get("price_per_ounce", 0)
+    xag = data.get("silver_per_ounce", 0)
+    xpt = data.get("platinum_per_ounce", 0)
+    gram = xau / 31.1035 if xau else 0
+    change = data.get("change_24h_pct", None)
+    change_str = f"{change:+.2f}%" if change is not None else "N/A"
+    change_emoji = "📈" if (change or 0) >= 0 else "📉"
+
+    if lang == "ar":
+        lines = [
+            "🥇 *أسعار الذهب والمعادن*",
+            sep,
+            f"💛 ذهب 24K: **${xau:,.2f}** / أونصة",
+            f"   **${gram:,.2f}** / غرام",
+        ]
+        if xag:
+            lines.append(f"🥈 فضة:    **${xag:,.2f}** / أونصة")
+        if xpt:
+            lines.append(f"🔘 بلاتين: **${xpt:,.2f}** / أونصة")
+        lines.append(f"{change_emoji} تغيير 24س: **{change_str}**")
+    else:
+        lines = [
+            "🥇 *Gold & Precious Metals*",
+            sep,
+            f"💛 Gold 24K: **${xau:,.2f}** / oz",
+            f"   **${gram:,.2f}** / gram",
+        ]
+        if xag:
+            lines.append(f"🥈 Silver:   **${xag:,.2f}** / oz")
+        if xpt:
+            lines.append(f"🔘 Platinum: **${xpt:,.2f}** / oz")
+        lines.append(f"{change_emoji} 24h Change: **{change_str}**")
+
+    return "\n".join(lines)
+
+
+# ── crypto card ───────────────────────────────────────────────────────────────
+
+def crypto_card(data: dict, lang: str) -> str:
+    """Format cryptocurrency data into a visual card."""
+    sep = _sep()
+    name = data.get("name", "")
+    symbol = data.get("symbol", "")
+    price = data.get("price", 0)
+    change_24h = data.get("change_24h", 0) or 0
+    change_7d = data.get("change_7d", None)
+    rank = data.get("rank", "N/A")
+    mcap = data.get("market_cap", 0) or 0
+    emoji = "📈" if change_24h >= 0 else "📉"
+
+    if lang == "ar":
+        lines = [
+            f"₿ *{name} ({symbol})*",
+            sep,
+            f"💰 السعر: **${price:,.2f}**",
+            f"{emoji} 24س: **{change_24h:+.2f}%**",
+        ]
+        if change_7d is not None:
+            lines.append(f"📊 7 أيام: **{change_7d:+.2f}%**")
+        lines.append(f"🏆 الترتيب: **#{rank}**")
+        if mcap:
+            lines.append(f"💎 القيمة السوقية: **${mcap:,.0f}**")
+    else:
+        lines = [
+            f"₿ *{name} ({symbol})*",
+            sep,
+            f"💰 Price: **${price:,.2f}**",
+            f"{emoji} 24h: **{change_24h:+.2f}%**",
+        ]
+        if change_7d is not None:
+            lines.append(f"📊 7d: **{change_7d:+.2f}%**")
+        lines.append(f"🏆 Rank: **#{rank}**")
+        if mcap:
+            lines.append(f"💎 Market Cap: **${mcap:,.0f}**")
+
+    return "\n".join(lines)
+
+
+# ── stock card ────────────────────────────────────────────────────────────────
+
+def stock_card(data: dict, lang: str) -> str:
+    """Format stock quote data into a visual card."""
+    sep = _sep()
+    name = data.get("name", "")
+    symbol = data.get("symbol", "")
+    price = data.get("price", 0) or 0
+    change = data.get("change", 0) or 0
+    change_pct = data.get("change_percent", 0) or 0
+    volume = data.get("volume", 0) or 0
+    mcap = data.get("market_cap", 0) or 0
+    pe = data.get("pe_ratio", None)
+    emoji = "📈" if change >= 0 else "📉"
+
+    if lang == "ar":
+        lines = [
+            f"📊 *{name} ({symbol})*",
+            sep,
+            f"💰 السعر: **${price:,.2f}**",
+            f"{emoji} التغيير: **{change:+,.2f} ({change_pct:+.2f}%)**",
+            f"📦 الحجم: **{volume:,}**",
+        ]
+        if mcap:
+            lines.append(f"💎 القيمة السوقية: **${mcap:,.0f}**")
+        if pe:
+            lines.append(f"📐 P/E: **{pe:.2f}**")
+    else:
+        lines = [
+            f"📊 *{name} ({symbol})*",
+            sep,
+            f"💰 Price: **${price:,.2f}**",
+            f"{emoji} Change: **{change:+,.2f} ({change_pct:+.2f}%)**",
+            f"📦 Volume: **{volume:,}**",
+        ]
+        if mcap:
+            lines.append(f"💎 Market Cap: **${mcap:,.0f}**")
+        if pe:
+            lines.append(f"📐 P/E: **{pe:.2f}**")
+
+    return "\n".join(lines)
+
+
+# ── currency card ─────────────────────────────────────────────────────────────
+
+def currency_card(data: dict, base: str, lang: str) -> str:
+    """Format currency exchange rates into a visual card."""
+    sep = _sep()
+    rates = data.get("rates", {})
+    updated = data.get("updated", "")
+
+    DISPLAY_CURRENCIES = [
+        ("USD", "🇺🇸", "دولار", "Dollar"),
+        ("EUR", "🇪🇺", "يورو", "Euro"),
+        ("GBP", "🇬🇧", "جنيه", "Pound"),
+        ("AED", "🇦🇪", "درهم", "Dirham"),
+        ("SAR", "🇸🇦", "ريال سعودي", "SAR"),
+        ("TRY", "🇹🇷", "ليرة تركية", "TRY"),
+        ("LBP", "🇱🇧", "ل.ل.", "LBP"),
+        ("EGP", "🇪🇬", "جنيه مصري", "EGP"),
+    ]
+
+    if lang == "ar":
+        lines = [f"💱 *أسعار العملات — أساس: {base}*", sep]
+        for code, flag, name_ar, _ in DISPLAY_CURRENCIES:
+            if code == base:
+                continue
+            rate = rates.get(code)
+            if rate is not None:
+                lines.append(f"{flag} {name_ar}: **{rate:,.4f}**")
+    else:
+        lines = [f"💱 *Currency Rates — Base: {base}*", sep]
+        for code, flag, _, name_en in DISPLAY_CURRENCIES:
+            if code == base:
+                continue
+            rate = rates.get(code)
+            if rate is not None:
+                lines.append(f"{flag} {name_en}: **{rate:,.4f}**")
+
+    if updated:
+        lines.append(f"\n🕐 Updated: {updated}")
+
+    return "\n".join(lines)
+'''
+
 FILES["services/omega_image.py"] = r'''
 import logging
 import asyncio
@@ -5551,8 +5889,13 @@ def register_all_handlers(dp):
 
 FILES["handlers/start.py"] = r'''
 import logging
+import os
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import (
+    Message, CallbackQuery,
+    InlineKeyboardMarkup, InlineKeyboardButton,
+    WebAppInfo,
+)
 from aiogram.filters import Command, CommandStart
 
 from config import t, MENU_LABELS, MENU_LAYOUT, get_menu_label, settings
@@ -5561,6 +5904,10 @@ from database.crud import CRUDManager
 
 logger = logging.getLogger(__name__)
 router = Router(name="start")
+
+# TWA URL ─ resolves to Render external URL + /static/menu.html
+_BASE_URL = os.environ.get("RENDER_EXTERNAL_URL", "").rstrip("/")
+TWA_MENU_URL = f"{_BASE_URL}/static/menu.html" if _BASE_URL else ""
 
 
 def _build_main_menu(lang: str = "en") -> InlineKeyboardMarkup:
@@ -5572,12 +5919,25 @@ def _build_main_menu(lang: str = "en") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
+def _build_twa_button(lang: str = "en") -> InlineKeyboardMarkup:
+    """Return a keyboard with one button that opens the TWA menu."""
+    label = "📋 القائمة" if lang == "ar" else "📋 Menu"
+    if TWA_MENU_URL:
+        btn = InlineKeyboardButton(text=label, web_app=WebAppInfo(url=TWA_MENU_URL))
+    else:
+        # Fallback: inline menu if TWA URL not set
+        btn = InlineKeyboardButton(text=label, callback_data="menu:home")
+    return InlineKeyboardMarkup(inline_keyboard=[[btn]])
+
+
 @router.message(CommandStart())
 async def cmd_start(message: Message, lang: str = "en") -> None:
     try:
         name = message.from_user.first_name or "User"
         welcome = t("welcome", lang, name=name)
-        await message.answer(welcome, reply_markup=_build_main_menu(lang))
+        # Show TWA menu button first, then inline grid below
+        markup = _build_twa_button(lang)
+        await message.answer(welcome, reply_markup=markup)
     except Exception as exc:
         logger.error(f"Start error: {exc}", exc_info=True)
         await message.answer(t("error", "en"))
@@ -5585,7 +5945,7 @@ async def cmd_start(message: Message, lang: str = "en") -> None:
 
 @router.message(Command("menu"))
 async def cmd_menu(message: Message, lang: str = "en") -> None:
-    await message.answer(t("main_menu", "en"), reply_markup=_build_main_menu())
+    await message.answer(t("main_menu", "en"), reply_markup=_build_twa_button(lang))
 
 
 @router.message(Command("help"))
@@ -5608,6 +5968,112 @@ async def handle_menu_callback(callback: CallbackQuery, lang: str = "en") -> Non
     await callback.message.answer(f"Use {cmd} command or just type your request!")
 
 
+# ── TWA data_sent handler ─────────────────────────────────────────────────────
+
+@router.message(F.web_app_data)
+async def handle_menu_selection(message: Message, lang: str = "en") -> None:
+    """Handle button selections sent from the Telegram Web App menu."""
+    data = (message.web_app_data.data or "").strip().lower()
+    logger.info(f"TWA menu selection: {data!r} from user {message.from_user.id}")
+
+    try:
+        if data == "gold":
+            from handlers.gold import cmd_gold
+            await cmd_gold(message, lang=lang)
+
+        elif data == "currency":
+            from handlers.currency import cmd_currency
+            await cmd_currency(message, lang=lang)
+
+        elif data == "fuel":
+            from handlers.fuel import cmd_fuel
+            await cmd_fuel(message, lang=lang)
+
+        elif data == "weather":
+            if lang == "ar":
+                await message.answer("🌤 أرسل اسم المدينة للحصول على الطقس.\nمثال: بيروت")
+            else:
+                await message.answer("🌤 Send a city name to get the weather.\nExample: Beirut")
+
+        elif data == "football":
+            from handlers.football import cmd_football
+            await cmd_football(message, lang=lang)
+
+        elif data == "movies":
+            from handlers.movies import cmd_movie
+            await cmd_movie(message, lang=lang)
+
+        elif data == "cv":
+            from handlers.cv_generator import cmd_cv
+            await cmd_cv(message, lang=lang)
+
+        elif data == "logo":
+            from handlers.logo_generator import cmd_logo
+            await cmd_logo(message, lang=lang)
+
+        elif data == "ai":
+            if lang == "ar":
+                await message.answer("🤖 اكتب سؤالك وسأجيب عليك فوراً!")
+            else:
+                await message.answer("🤖 Ask me anything and I'll answer right away!")
+
+        elif data == "stocks":
+            if lang == "ar":
+                await message.answer("📈 أرسل رمز السهم (مثال: AAPL, TSLA)")
+            else:
+                await message.answer("📈 Send a stock symbol (e.g. AAPL, TSLA)")
+
+        elif data == "crypto":
+            from handlers.crypto import cmd_crypto
+            await cmd_crypto(message, lang=lang)
+
+        elif data == "news":
+            from handlers.news import cmd_news
+            await cmd_news(message, lang=lang)
+
+        elif data == "flights":
+            if lang == "ar":
+                await message.answer("✈️ أرسل رمز المطار أو اسم المدينة (مثال: BEY)")
+            else:
+                await message.answer("✈️ Send an airport code or city (e.g. BEY)")
+
+        elif data == "quakes":
+            # Try dedicated quakes handler first, fall back to inline fetch
+            try:
+                from handlers.quakes import cmd_quakes
+                await cmd_quakes(message, lang=lang)
+            except ImportError:
+                if lang == "ar":
+                    await message.answer("🌍 جارٍ جلب بيانات الزلازل...")
+                else:
+                    await message.answer("🌍 Fetching earthquake data...")
+                from api_clients.omega_quakes import omega_quakes
+                result = await omega_quakes.get_recent(min_magnitude=4.0, limit=10)
+                if result.get("error") or not result.get("quakes"):
+                    await message.answer(t("error", lang))
+                    return
+                quakes = result["quakes"][:10]
+                lines = ["🌍 *Recent Earthquakes (M4+)*\n"]
+                for q in quakes:
+                    mag = q.get("magnitude", 0)
+                    place = q.get("place", "Unknown")
+                    mag_emoji = "🟥" if mag >= 6 else ("🟧" if mag >= 5 else "🟨")
+                    lines.append(f"{mag_emoji} M{mag:.1f} — {place}")
+                await message.answer("\n".join(lines), parse_mode="Markdown")
+
+        elif data == "settings":
+            from handlers.settings import cmd_settings
+            await cmd_settings(message, lang=lang)
+
+        else:
+            logger.warning(f"Unknown TWA menu selection: {data!r}")
+            await message.answer(t("error", lang))
+
+    except Exception as exc:
+        logger.error(f"TWA menu handler error for {data!r}: {exc}", exc_info=True)
+        await message.answer(t("error", lang))
+
+
 def register_start_handlers(dp) -> None:
     dp.include_router(router)
 '''
@@ -5619,6 +6085,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from aiogram.filters import Command
 
 from api_clients.omega_metals import omega_metals
+from services.cards import gold_card
 from config import GOLD_KARATS, METAL_NAMES, t
 
 logger = logging.getLogger(__name__)
@@ -5634,15 +6101,35 @@ async def cmd_gold(message: Message, lang: str = "en") -> None:
             await message.answer(t("error", lang))
             return
 
-        price = f"{data['price_per_ounce']:,.2f}"
-        text = t("gold_price", lang).replace("{price}", price)
-        if data.get("stale"):
-            text += f"\n\n⏰ {data.get('age_minutes', 0)} min ago"
+        # Enrich data with silver + platinum for the card
+        try:
+            ag = await omega_metals.get_prices("XAG", "USD")
+            if not ag.get("error"):
+                data["silver_per_ounce"] = ag.get("price_per_ounce", 0)
+        except Exception:
+            pass
+        try:
+            pt = await omega_metals.get_prices("XPT", "USD")
+            if not pt.get("error"):
+                data["platinum_per_ounce"] = pt.get("price_per_ounce", 0)
+        except Exception:
+            pass
+
+        text = gold_card(data, lang)
+        # Add karat detail if available
+        if data.get("karats"):
+            sep = "━━━━━━━━━━━━━━"
+            karat_lines = [f"\n{sep}"]
+            karat_label = "💛 أسعار الكيلو غرام" if lang == "ar" else "💛 Karat Prices (per gram)"
+            karat_lines.append(karat_label)
+            for k in ["24K", "22K", "21K", "18K", "14K", "9K"]:
+                if k in data["karats"]:
+                    karat_lines.append(f"  {k}: **${data['karats'][k]['per_gram']:,.2f}**")
+            text += "\n".join(karat_lines)
 
         buttons = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text=t("gold_karats_btn", lang), callback_data="gold:karats"),
-             InlineKeyboardButton(text=t("btn_refresh", lang), callback_data="gold:refresh")],
-            [InlineKeyboardButton(text=t("btn_silver", lang), callback_data="metal:XAG"),
+            [InlineKeyboardButton(text=t("btn_refresh", lang), callback_data="gold:refresh"),
+             InlineKeyboardButton(text=t("btn_silver", lang), callback_data="metal:XAG"),
              InlineKeyboardButton(text=t("btn_platinum", lang), callback_data="metal:XPT")],
         ])
         await message.answer(text, parse_mode="Markdown", reply_markup=buttons)
@@ -5750,15 +6237,37 @@ def register_currency_handlers(dp) -> None:
 
 FILES["handlers/fuel.py"] = r'''
 import logging
+import httpx
 from aiogram import Router
 from aiogram.types import Message
 from aiogram.filters import Command
 
 from api_clients.omega_fuel import omega_fuel
-from config import t
+from config import t, settings
+from services.cards import fuel_card
 
 logger = logging.getLogger(__name__)
 router = Router(name="fuel")
+
+_FALLBACK_RATE = 89700.0  # LBP per 1 USD fallback
+
+
+async def _fetch_exchange_rate() -> float:
+    """Fetch USD→LBP rate from exchangerate-api.com. Returns fallback on failure."""
+    key = getattr(settings, "exchange_rate_key", "") or ""
+    if key:
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                url = f"https://v6.exchangerate-api.com/v6/{key}/pair/USD/LBP"
+                resp = await client.get(url)
+                resp.raise_for_status()
+                js = resp.json()
+                rate = float(js.get("conversion_rate", 0))
+                if rate > 10000:
+                    return rate
+        except Exception as exc:
+            logger.debug(f"Exchange rate fetch failed: {exc}")
+    return _FALLBACK_RATE
 
 
 @router.message(Command("fuel"))
@@ -5774,6 +6283,38 @@ async def cmd_fuel(message: Message, lang: str = "en") -> None:
     await message.answer(t("fetching", lang))
     try:
         data = await omega_fuel.get_prices(country)
+
+        # ── Lebanon: render the rich visual card ──────────────────────────────
+        if country == "LB":
+            prices_raw = data.get("prices", {}) if not data.get("error") else {}
+
+            # Fetch LBP/USD rate
+            rate = await _fetch_exchange_rate()
+
+            # Determine data age / source
+            source_label = "IPT Group"
+            ago = "—"
+            if data.get("error") or not prices_raw:
+                # Use hard-coded fallback prices so we always show a card
+                prices_raw = {
+                    "بنزين 98": "504,000 ل.ل.",
+                    "بنزين 95": "490,000 ل.ل.",
+                    "ديزل":     "459,000 ل.ل.",
+                    "غاز 10kg": "370,000 ل.ل.",
+                }
+                ago = "N/A"
+
+            card_text = fuel_card(
+                prices_llp=prices_raw,
+                rate=rate,
+                lang=lang,
+                source=source_label,
+                ago=ago,
+            )
+            await message.answer(card_text, parse_mode="Markdown")
+            return
+
+        # ── Other countries: simple plain display ─────────────────────────────
         if data.get("error"):
             await message.answer(t("error", lang))
             return
@@ -5791,6 +6332,7 @@ async def cmd_fuel(message: Message, lang: str = "en") -> None:
             text += f"\n{t('label_note', lang)}: {data['note']}"
 
         await message.answer(text, parse_mode="Markdown")
+
     except Exception as exc:
         logger.error(f"Fuel error: {exc}", exc_info=True)
         await message.answer(t("error", lang))
@@ -5807,6 +6349,7 @@ from aiogram.types import Message
 from aiogram.filters import Command
 
 from api_clients.omega_weather import omega_weather
+from services.cards import weather_card
 from config import t
 
 logger = logging.getLogger(__name__)
@@ -5817,7 +6360,7 @@ router = Router(name="weather")
 async def cmd_weather(message: Message, lang: str = "en") -> None:
     city = message.text.replace("/weather", "").strip() if message.text else ""
     if not city:
-        city = "Beirut"  # default to Beirut if no city given
+        city = "Beirut"
 
     await message.answer(t("fetching", lang))
     try:
@@ -5825,16 +6368,7 @@ async def cmd_weather(message: Message, lang: str = "en") -> None:
         if data.get("error"):
             await message.answer(t("error", lang))
             return
-
-        text = f"🌤 **{data.get('city', city)}**\n\n"
-        text += f"🌡 {t('label_temp', lang)}: {data['temperature']}°C\n"
-        text += f"🤔 {t('label_feels', lang)}: {data.get('feels_like', 'N/A')}°C\n"
-        text += f"💧 {t('label_humidity', lang)}: {data.get('humidity', 'N/A')}%\n"
-        text += f"💨 {t('label_wind', lang)}: {data.get('wind_speed', 'N/A')} km/h\n"
-        if data.get("description"):
-            text += f"📝 {data['description']}\n"
-
-        await message.answer(text, parse_mode="Markdown")
+        await message.answer(weather_card(data, lang), parse_mode="Markdown")
     except Exception as exc:
         logger.error(f"Weather error: {exc}", exc_info=True)
         await message.answer(t("error", lang))
@@ -6629,6 +7163,7 @@ from aiogram.types import Message
 from aiogram.filters import Command
 
 from api_clients.omega_stocks import omega_stocks
+from services.cards import stock_card
 from config import t
 
 logger = logging.getLogger(__name__)
@@ -6648,18 +7183,7 @@ async def cmd_stock(message: Message, lang: str = "en") -> None:
         if data.get("error"):
             await message.answer(t("not_found", lang))
             return
-
-        change_emoji = "📈" if (data.get("change", 0) or 0) >= 0 else "📉"
-        text = f"📊 **{data.get('name', symbol)} ({data['symbol']})**\n\n"
-        text += f"{t('label_price', lang)}: ${data.get('price', 0):,.2f}\n"
-        text += f"{change_emoji} {t('label_change', lang)}: {data.get('change', 0):+,.2f} ({data.get('change_percent', 0):+.2f}%)\n"
-        text += f"{t('label_volume', lang)}: {data.get('volume', 0):,}\n"
-        if data.get("market_cap"):
-            text += f"{t('label_mcap', lang)}: ${data['market_cap']:,.0f}\n"
-        if data.get("pe_ratio"):
-            text += f"📐 P/E: {data['pe_ratio']:.2f}\n"
-
-        await message.answer(text, parse_mode="Markdown")
+        await message.answer(stock_card(data, lang), parse_mode="Markdown")
     except Exception as exc:
         logger.error(f"Stock error: {exc}", exc_info=True)
         await message.answer(t("error", lang))
@@ -6676,6 +7200,7 @@ from aiogram.types import Message
 from aiogram.filters import Command
 
 from api_clients.omega_crypto import omega_crypto
+from services.cards import crypto_card
 from config import t
 
 logger = logging.getLogger(__name__)
@@ -6686,16 +7211,18 @@ router = Router(name="crypto")
 async def cmd_crypto(message: Message, lang: str = "en") -> None:
     coin = message.text.replace("/crypto", "").strip().lower() if message.text else ""
     if not coin:
+        # Show top 10 as a compact list card
         data = await omega_crypto.get_top_coins(10)
         if data.get("error"):
             await message.answer(t("error", lang))
             return
-        text = t("crypto_top_title", lang) + "\n\n"
+        sep = "━━━━━━━━━━━━━━"
+        title = "₿ *أفضل 10 عملات رقمية*" if lang == "ar" else "₿ *Top 10 Crypto*"
+        lines = [title, sep]
         for c in data["coins"]:
             emoji = "📈" if (c.get("change_24h") or 0) >= 0 else "📉"
-            text += f"{c['rank']}. **{c['symbol']}** — ${c['price']:,.2f} {emoji} {c.get('change_24h', 0):+.1f}%\n"
-        text += "\n" + t("crypto_detail_hint", lang)
-        await message.answer(text, parse_mode="Markdown")
+            lines.append(f"**#{c['rank']}** {c['symbol']} — **${c['price']:,.2f}** {emoji} {c.get('change_24h', 0):+.1f}%")
+        await message.answer("\n".join(lines), parse_mode="Markdown")
         return
 
     await message.answer(t("fetching", lang))
@@ -6704,16 +7231,7 @@ async def cmd_crypto(message: Message, lang: str = "en") -> None:
         if data.get("error"):
             await message.answer(t("not_found", lang))
             return
-        emoji = "📈" if (data.get("change_24h") or 0) >= 0 else "📉"
-        text = f"₿ **{data['name']} ({data['symbol']})**\n\n"
-        text += f"{t('label_price', lang)}: ${data['price']:,.2f}\n"
-        text += f"{emoji} 24h: {data.get('change_24h', 0):+.2f}%\n"
-        if data.get("change_7d"):
-            text += f"📊 7d: {data['change_7d']:+.2f}%\n"
-        text += f"{t('label_rank', lang)}: #{data.get('rank', 'N/A')}\n"
-        text += f"{t('label_mcap', lang)}: ${data.get('market_cap', 0):,.0f}\n"
-
-        await message.answer(text, parse_mode="Markdown")
+        await message.answer(crypto_card(data, lang), parse_mode="Markdown")
     except Exception as exc:
         logger.error(f"Crypto error: {exc}", exc_info=True)
         await message.answer(t("error", lang))
@@ -7266,6 +7784,8 @@ import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Response
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
 from aiogram.types import Update
@@ -7366,6 +7886,22 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Omega Bot", lifespan=lifespan)
 
+# Mount static files (TWA menu HTML + any other assets)
+_STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+os.makedirs(_STATIC_DIR, exist_ok=True)
+app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
+
+
+@app.get("/menu", response_class=HTMLResponse)
+async def menu_page():
+    """Redirect-friendly entry point for the TWA menu page."""
+    menu_html = os.path.join(_STATIC_DIR, "menu.html")
+    try:
+        with open(menu_html, "r", encoding="utf-8") as fh:
+            return HTMLResponse(content=fh.read(), status_code=200)
+    except FileNotFoundError:
+        return HTMLResponse(content="<h1>Menu not found</h1>", status_code=404)
+
 
 @app.post("/webhook")
 async def webhook_handler(request: Request) -> Response:
@@ -7417,6 +7953,195 @@ async def _self_ping():
         except Exception:
             pass
         await asyncio.sleep(240)  # every 4 minutes
+'''
+
+FILES["static/menu.html"] = r'''<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Omega Bot Menu</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: linear-gradient(135deg, #0d0d1a 0%, #1a1a2e 50%, #16213e 100%);
+    min-height: 100vh;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans Arabic', sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 12px;
+    overflow-x: hidden;
+  }
+
+  h1 {
+    color: rgba(255,255,255,0.9);
+    font-size: 1.1rem;
+    margin-bottom: 14px;
+    text-align: center;
+    letter-spacing: 0.5px;
+    text-shadow: 0 0 20px rgba(100,160,255,0.4);
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    width: 100%;
+    max-width: 360px;
+  }
+
+  .btn {
+    background: rgba(255,255,255,0.07);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 16px;
+    padding: 14px 6px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    cursor: pointer;
+    transition: all 0.18s ease;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    min-height: 84px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.08);
+  }
+
+  .btn:hover {
+    background: rgba(255,255,255,0.14);
+    border-color: rgba(255,255,255,0.25);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.12);
+  }
+
+  .btn:active {
+    transform: scale(0.94) translateY(0);
+    background: rgba(100,160,255,0.2);
+    border-color: rgba(100,160,255,0.5);
+  }
+
+  .btn .icon {
+    font-size: 1.9rem;
+    line-height: 1;
+    display: block;
+    animation: float 3s ease-in-out infinite;
+    animation-delay: var(--delay, 0s);
+  }
+
+  .btn .label {
+    font-size: 0.72rem;
+    color: rgba(255,255,255,0.82);
+    text-align: center;
+    line-height: 1.25;
+    font-weight: 500;
+  }
+
+  .btn .label-en {
+    font-size: 0.63rem;
+    color: rgba(255,255,255,0.45);
+    text-align: center;
+    margin-top: 1px;
+  }
+
+  @keyframes float {
+    0%, 100% { transform: translateY(0); }
+    50%       { transform: translateY(-3px); }
+  }
+
+  /* Unique accent colours per button */
+  .btn[data-key="gold"]     { --accent: #ffd700; }
+  .btn[data-key="currency"] { --accent: #4caf96; }
+  .btn[data-key="fuel"]     { --accent: #ff8c42; }
+  .btn[data-key="weather"]  { --accent: #64b5f6; }
+  .btn[data-key="football"] { --accent: #81c784; }
+  .btn[data-key="movies"]   { --accent: #ce93d8; }
+  .btn[data-key="cv"]       { --accent: #80cbc4; }
+  .btn[data-key="logo"]     { --accent: #ffb74d; }
+  .btn[data-key="ai"]       { --accent: #4dd0e1; }
+  .btn[data-key="stocks"]   { --accent: #a5d6a7; }
+  .btn[data-key="crypto"]   { --accent: #f48fb1; }
+  .btn[data-key="news"]     { --accent: #90caf9; }
+  .btn[data-key="flights"]  { --accent: #b0bec5; }
+  .btn[data-key="quakes"]   { --accent: #ef9a9a; }
+  .btn[data-key="settings"] { --accent: #ffe082; }
+
+  .btn .icon { color: var(--accent, #ffffff); }
+
+  .btn:hover {
+    border-color: var(--accent, rgba(255,255,255,0.25));
+    box-shadow: 0 8px 24px rgba(0,0,0,0.35),
+                0 0 12px rgba(var(--accent-rgb, 255,255,255), 0.15),
+                inset 0 1px 0 rgba(255,255,255,0.12);
+  }
+</style>
+</head>
+<body>
+<h1 id="title">⚡ Omega Bot</h1>
+<div class="grid" id="grid"></div>
+
+<script>
+const tg = window.Telegram && window.Telegram.WebApp;
+if (tg) { tg.ready(); tg.expand(); }
+
+const lang = (tg && tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.language_code) || 'en';
+const isAr = lang === 'ar';
+
+document.documentElement.dir = isAr ? 'rtl' : 'ltr';
+document.documentElement.lang = isAr ? 'ar' : 'en';
+document.getElementById('title').textContent = isAr ? '⚡ أوميغا بوت' : '⚡ Omega Bot';
+
+const BUTTONS = [
+  { key:'gold',     icon:'🥇', ar:'ذهب',     en:'Gold'     },
+  { key:'currency', icon:'💱', ar:'عملة',    en:'Currency' },
+  { key:'fuel',     icon:'⛽', ar:'محروقات', en:'Fuel'     },
+  { key:'weather',  icon:'🌤', ar:'طقس',     en:'Weather'  },
+  { key:'football', icon:'⚽', ar:'كرة قدم', en:'Football' },
+  { key:'movies',   icon:'🎬', ar:'أفلام',   en:'Movies'   },
+  { key:'cv',       icon:'📄', ar:'CV',       en:'CV'       },
+  { key:'logo',     icon:'🎨', ar:'شعار',    en:'Logo'     },
+  { key:'ai',       icon:'🤖', ar:'ذكاء اصطناعي', en:'AI Chat' },
+  { key:'stocks',   icon:'📈', ar:'أسهم',    en:'Stocks'   },
+  { key:'crypto',   icon:'₿',  ar:'كريبتو',  en:'Crypto'   },
+  { key:'news',     icon:'📰', ar:'أخبار',   en:'News'     },
+  { key:'flights',  icon:'✈️', ar:'رحلات',   en:'Flights'  },
+  { key:'quakes',   icon:'🌍', ar:'زلازل',   en:'Quakes'   },
+  { key:'settings', icon:'⚙️', ar:'إعدادات', en:'Settings' },
+];
+
+const grid = document.getElementById('grid');
+
+BUTTONS.forEach((b, i) => {
+  const btn = document.createElement('button');
+  btn.className = 'btn';
+  btn.dataset.key = b.key;
+  btn.style.setProperty('--delay', `${(i * 0.13).toFixed(2)}s`);
+  btn.innerHTML = `
+    <span class="icon">${b.icon}</span>
+    <span class="label">${isAr ? b.ar : b.en}</span>
+    <span class="label-en">${isAr ? b.en : b.ar}</span>
+  `;
+  btn.addEventListener('click', () => {
+    btn.style.transition = 'none';
+    btn.style.transform = 'scale(0.90)';
+    setTimeout(() => {
+      if (tg) {
+        tg.sendData(b.key);
+        tg.close();
+      } else {
+        alert('Selected: ' + b.key);
+      }
+    }, 120);
+  });
+  grid.appendChild(btn);
+});
+</script>
+</body>
+</html>
 '''
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -5,6 +5,8 @@ import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Response
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
 from aiogram.types import Update
@@ -104,6 +106,22 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Omega Bot", lifespan=lifespan)
+
+# Mount static files (TWA menu HTML + any other assets)
+_STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+os.makedirs(_STATIC_DIR, exist_ok=True)
+app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
+
+
+@app.get("/menu", response_class=HTMLResponse)
+async def menu_page():
+    """Redirect-friendly entry point for the TWA menu page."""
+    menu_html = os.path.join(_STATIC_DIR, "menu.html")
+    try:
+        with open(menu_html, "r", encoding="utf-8") as fh:
+            return HTMLResponse(content=fh.read(), status_code=200)
+    except FileNotFoundError:
+        return HTMLResponse(content="<h1>Menu not found</h1>", status_code=404)
 
 
 @app.post("/webhook")

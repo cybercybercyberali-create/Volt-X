@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Omega Bot Menu</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: linear-gradient(135deg, #0d0d1a 0%, #1a1a2e 50%, #16213e 100%);
+    min-height: 100vh;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans Arabic', sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 12px;
+    overflow-x: hidden;
+  }
+
+  h1 {
+    color: rgba(255,255,255,0.9);
+    font-size: 1.1rem;
+    margin-bottom: 14px;
+    text-align: center;
+    letter-spacing: 0.5px;
+    text-shadow: 0 0 20px rgba(100,160,255,0.4);
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    width: 100%;
+    max-width: 360px;
+  }
+
+  .btn {
+    background: rgba(255,255,255,0.07);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 16px;
+    padding: 14px 6px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    cursor: pointer;
+    transition: all 0.18s ease;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    min-height: 84px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.08);
+  }
+
+  .btn:hover {
+    background: rgba(255,255,255,0.14);
+    border-color: rgba(255,255,255,0.25);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.12);
+  }
+
+  .btn:active {
+    transform: scale(0.94) translateY(0);
+    background: rgba(100,160,255,0.2);
+    border-color: rgba(100,160,255,0.5);
+  }
+
+  .btn .icon {
+    font-size: 1.9rem;
+    line-height: 1;
+    display: block;
+    animation: float 3s ease-in-out infinite;
+    animation-delay: var(--delay, 0s);
+  }
+
+  .btn .label {
+    font-size: 0.72rem;
+    color: rgba(255,255,255,0.82);
+    text-align: center;
+    line-height: 1.25;
+    font-weight: 500;
+  }
+
+  .btn .label-en {
+    font-size: 0.63rem;
+    color: rgba(255,255,255,0.45);
+    text-align: center;
+    margin-top: 1px;
+  }
+
+  @keyframes float {
+    0%, 100% { transform: translateY(0); }
+    50%       { transform: translateY(-3px); }
+  }
+
+  /* Unique accent colours per button */
+  .btn[data-key="gold"]     { --accent: #ffd700; }
+  .btn[data-key="currency"] { --accent: #4caf96; }
+  .btn[data-key="fuel"]     { --accent: #ff8c42; }
+  .btn[data-key="weather"]  { --accent: #64b5f6; }
+  .btn[data-key="football"] { --accent: #81c784; }
+  .btn[data-key="movies"]   { --accent: #ce93d8; }
+  .btn[data-key="cv"]       { --accent: #80cbc4; }
+  .btn[data-key="logo"]     { --accent: #ffb74d; }
+  .btn[data-key="ai"]       { --accent: #4dd0e1; }
+  .btn[data-key="stocks"]   { --accent: #a5d6a7; }
+  .btn[data-key="crypto"]   { --accent: #f48fb1; }
+  .btn[data-key="news"]     { --accent: #90caf9; }
+  .btn[data-key="flights"]  { --accent: #b0bec5; }
+  .btn[data-key="quakes"]   { --accent: #ef9a9a; }
+  .btn[data-key="settings"] { --accent: #ffe082; }
+
+  .btn .icon { color: var(--accent, #ffffff); }
+
+  .btn:hover {
+    border-color: var(--accent, rgba(255,255,255,0.25));
+    box-shadow: 0 8px 24px rgba(0,0,0,0.35),
+                0 0 12px rgba(var(--accent-rgb, 255,255,255), 0.15),
+                inset 0 1px 0 rgba(255,255,255,0.12);
+  }
+</style>
+</head>
+<body>
+<h1 id="title">⚡ Omega Bot</h1>
+<div class="grid" id="grid"></div>
+
+<script>
+const tg = window.Telegram && window.Telegram.WebApp;
+if (tg) { tg.ready(); tg.expand(); }
+
+const lang = (tg && tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.language_code) || 'en';
+const isAr = lang === 'ar';
+
+document.documentElement.dir = isAr ? 'rtl' : 'ltr';
+document.documentElement.lang = isAr ? 'ar' : 'en';
+document.getElementById('title').textContent = isAr ? '⚡ أوميغا بوت' : '⚡ Omega Bot';
+
+const BUTTONS = [
+  { key:'gold',     icon:'🥇', ar:'ذهب',     en:'Gold'     },
+  { key:'currency', icon:'💱', ar:'عملة',    en:'Currency' },
+  { key:'fuel',     icon:'⛽', ar:'محروقات', en:'Fuel'     },
+  { key:'weather',  icon:'🌤', ar:'طقس',     en:'Weather'  },
+  { key:'football', icon:'⚽', ar:'كرة قدم', en:'Football' },
+  { key:'movies',   icon:'🎬', ar:'أفلام',   en:'Movies'   },
+  { key:'cv',       icon:'📄', ar:'CV',       en:'CV'       },
+  { key:'logo',     icon:'🎨', ar:'شعار',    en:'Logo'     },
+  { key:'ai',       icon:'🤖', ar:'ذكاء اصطناعي', en:'AI Chat' },
+  { key:'stocks',   icon:'📈', ar:'أسهم',    en:'Stocks'   },
+  { key:'crypto',   icon:'₿',  ar:'كريبتو',  en:'Crypto'   },
+  { key:'news',     icon:'📰', ar:'أخبار',   en:'News'     },
+  { key:'flights',  icon:'✈️', ar:'رحلات',   en:'Flights'  },
+  { key:'quakes',   icon:'🌍', ar:'زلازل',   en:'Quakes'   },
+  { key:'settings', icon:'⚙️', ar:'إعدادات', en:'Settings' },
+];
+
+const grid = document.getElementById('grid');
+
+BUTTONS.forEach((b, i) => {
+  const btn = document.createElement('button');
+  btn.className = 'btn';
+  btn.dataset.key = b.key;
+  btn.style.setProperty('--delay', `${(i * 0.13).toFixed(2)}s`);
+  btn.innerHTML = `
+    <span class="icon">${b.icon}</span>
+    <span class="label">${isAr ? b.ar : b.en}</span>
+    <span class="label-en">${isAr ? b.en : b.ar}</span>
+  `;
+  btn.addEventListener('click', () => {
+    btn.style.transition = 'none';
+    btn.style.transform = 'scale(0.90)';
+    setTimeout(() => {
+      if (tg) {
+        tg.sendData(b.key);
+        tg.close();
+      } else {
+        alert('Selected: ' + b.key);
+      }
+    }, 120);
+  });
+  grid.appendChild(btn);
+});
+</script>
+</body>
+</html>
