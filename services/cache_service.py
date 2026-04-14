@@ -208,31 +208,16 @@ class AdminAlert:
 
         if count >= 3 and source_name not in cls._alerted:
             cls._alerted.add(source_name)
-            logger.warning(f"[ALERT] {source_name} failed {count} times consecutively")
-            if cls._bot and settings.admin_id_list:
-                try:
-                    for admin_id in settings.admin_id_list:
-                        await cls._bot.send_message(
-                            admin_id,
-                            f"⚠️ **{source_name}** failed {count} times\nFallbacks active — users not affected"
-                        )
-                except Exception as exc:
-                    logger.debug(f"Admin alert send error: {exc}")
+            # Just log — do NOT message admin (clutters the chat when admin is a regular user)
+            logger.warning(f"[ALERT] {source_name} failed {count} times consecutively — fallbacks active")
 
     @classmethod
     async def report_success(cls, source_name: str) -> None:
-        """Report API recovery. Alerts admin that service is back."""
-        from config import settings
+        """Report API recovery."""
         if source_name in cls._alerted:
             cls._alerted.discard(source_name)
             cls._failed_sources.pop(source_name, None)
             logger.info(f"[RECOVERED] {source_name} is back online")
-            if cls._bot and settings.admin_id_list:
-                try:
-                    for admin_id in settings.admin_id_list:
-                        await cls._bot.send_message(admin_id, f"✅ **{source_name}** recovered")
-                except Exception as exc:
-                    logger.debug(f"Admin recovery alert error: {exc}")
         else:
             cls._failed_sources.pop(source_name, None)
 
