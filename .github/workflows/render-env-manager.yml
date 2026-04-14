@@ -1,0 +1,143 @@
+name: Render Environment Manager
+
+on:
+  push:
+    paths:
+      - '.github/trigger-env-read'
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action: read / set'
+        required: true
+        default: 'read'
+        type: choice
+        options:
+          - read
+          - set
+      key:
+        description: 'Env var name (for set)'
+        required: false
+      value:
+        description: 'Env var value (for set)'
+        required: false
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  manage-env:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read current env vars from Render
+        if: github.event_name == 'push' || github.event.inputs.action == 'read'
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+        run: |
+          echo "Fetching env vars from Render..."
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -H "Authorization: Bearer $RENDER_API_KEY" \
+            "https://api.render.com/v1/services/srv-d79b7fkhg0os73e4iru0/env-vars")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | head -1)
+
+          echo "HTTP Status: $HTTP_CODE"
+
+          python3 - <<'PYEOF'
+          import json, os, sys
+
+          body = os.popen("echo '" + os.environ.get('BODY','[]').replace("'","'\\''") + "'").read()
+
+          # Re-fetch cleanly
+          import subprocess
+          result = subprocess.run([
+              'curl', '-s',
+              '-H', f"Authorization: Bearer {os.environ['RENDER_API_KEY']}",
+              'https://api.render.com/v1/services/srv-d79b7fkhg0os73e4iru0/env-vars'
+          ], capture_output=True, text=True)
+
+          try:
+              data = json.loads(result.stdout)
+          except:
+              data = result.stdout
+
+          report = ["# Render Environment Variables", f"Updated: {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M')}", "", "| Key | Status |", "|-----|--------|"]
+
+          sensitive = {'key','token','secret','password','pass','api'}
+
+          if isinstance(data, list):
+              for item in data:
+                  ev = item.get('envVar', item)
+                  k = ev.get('key', '')
+                  v = ev.get('value', '')
+                  is_sensitive = any(s in k.lower() for s in sensitive)
+                  if is_sensitive:
+                      status = '✅ SET' if v else '❌ MISSING'
+                  else:
+                      status = f'`{v}`' if v else '❌ EMPTY'
+                  report.append(f"| `{k}` | {status} |")
+          else:
+              report.append(f"```\n{json.dumps(data, indent=2)}\n```")
+
+          with open('.github/render-env-status.md', 'w') as f:
+              f.write('\n'.join(report))
+
+          print("Written to .github/render-env-status.md")
+          PYEOF
+
+      - name: Commit env status report
+        if: github.event_name == 'push' || github.event.inputs.action == 'read'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .github/render-env-status.md
+          git diff --cached --quiet || git commit -m "chore: update Render env status report"
+          git push
+
+      - name: Set env var on Render
+        if: github.event.inputs.action == 'set'
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          ENV_KEY: ${{ github.event.inputs.key }}
+          ENV_VALUE: ${{ github.event.inputs.value }}
+        run: |
+          CURRENT=$(curl -s \
+            -H "Authorization: Bearer $RENDER_API_KEY" \
+            "https://api.render.com/v1/services/srv-d79b7fkhg0os73e4iru0/env-vars")
+
+          UPDATED=$(echo "$CURRENT" | python3 -c "
+          import sys, json, os
+          data = json.load(sys.stdin)
+          key = os.environ['ENV_KEY']
+          value = os.environ['ENV_VALUE']
+          result = []
+          found = False
+          for item in data:
+              ev = item.get('envVar', item)
+              k = ev.get('key', '')
+              v = ev.get('value', '')
+              if k == key:
+                  v = value
+                  found = True
+              result.append({'key': k, 'value': v})
+          if not found:
+              result.append({'key': key, 'value': value})
+          print(json.dumps(result))
+          ")
+
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X PUT \
+            -H "Authorization: Bearer $RENDER_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "$UPDATED" \
+            "https://api.render.com/v1/services/srv-d79b7fkhg0os73e4iru0/env-vars")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "✅ $ENV_KEY updated successfully"
+          else
+            echo "❌ Failed: $(echo "$RESPONSE" | head -1)"
+            exit 1
+          fi
