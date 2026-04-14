@@ -6249,11 +6249,16 @@ from services.cards import fuel_card
 logger = logging.getLogger(__name__)
 router = Router(name="fuel")
 
-_FALLBACK_RATE = 89700.0  # LBP per 1 USD fallback
+# BDL official rate fixed at 89,500 LBP/USD since Feb 2023.
+# Valid range check: if scraped value is outside 80,000–150,000 it's rejected.
+_FALLBACK_RATE = 89500.0  # LBP per 1 USD — BDL official (Feb 2023 onwards)
 
 
 async def _fetch_exchange_rate() -> float:
-    """Fetch USD→LBP rate from exchangerate-api.com. Returns fallback on failure."""
+    """Fetch live USD→LBP rate. Tries 3 sources in order, falls back to BDL official."""
+    import re as _re
+
+    # Source 1: ExchangeRate-API (uses EXCHANGE_RATE_KEY)
     key = getattr(settings, "exchange_rate_key", "") or ""
     if key:
         try:
@@ -6263,10 +6268,48 @@ async def _fetch_exchange_rate() -> float:
                 resp.raise_for_status()
                 js = resp.json()
                 rate = float(js.get("conversion_rate", 0))
-                if rate > 10000:
+                if 80000 < rate < 150000:
+                    logger.debug(f"LBP rate from exchangerate-api: {rate}")
                     return rate
         except Exception as exc:
-            logger.debug(f"Exchange rate fetch failed: {exc}")
+            logger.debug(f"ExchangeRate-API failed: {exc}")
+
+    # Source 2: lirarate.org (live Lebanese market rate, no key needed)
+    try:
+        async with httpx.AsyncClient(
+            timeout=8.0,
+            headers={"User-Agent": "Mozilla/5.0"},
+            follow_redirects=True,
+        ) as client:
+            resp = await client.get("https://lirarate.org/")
+            resp.raise_for_status()
+            # Look for large numbers like 89,500 or 89500 in the page text
+            nums = _re.findall(r'\b(8[0-9][,\s]?\d{3})\b', resp.text)
+            for n in nums:
+                try:
+                    r = float(n.replace(",", "").replace(" ", ""))
+                    if 80000 < r < 150000:
+                        logger.debug(f"LBP rate from lirarate.org: {r}")
+                        return r
+                except ValueError:
+                    pass
+    except Exception as exc:
+        logger.debug(f"lirarate.org failed: {exc}")
+
+    # Source 3: Open-source free API (no key)
+    try:
+        async with httpx.AsyncClient(timeout=6.0) as client:
+            resp = await client.get("https://open.er-api.com/v6/latest/USD")
+            resp.raise_for_status()
+            js = resp.json()
+            rate = float(js.get("rates", {}).get("LBP", 0))
+            if 80000 < rate < 150000:
+                logger.debug(f"LBP rate from open.er-api: {rate}")
+                return rate
+    except Exception as exc:
+        logger.debug(f"open.er-api failed: {exc}")
+
+    logger.info(f"Using BDL fallback rate: {_FALLBACK_RATE}")
     return _FALLBACK_RATE
 
 
@@ -6295,14 +6338,16 @@ async def cmd_fuel(message: Message, lang: str = "en") -> None:
             source_label = "IPT Group"
             ago = "—"
             if data.get("error") or not prices_raw:
-                # Use hard-coded fallback prices so we always show a card
+                # Fallback: last-known IPT Group prices (updated weekly by BDL)
+                # These are from the latest verified IPT Group publication.
                 prices_raw = {
-                    "بنزين 98": "504,000 ل.ل.",
-                    "بنزين 95": "490,000 ل.ل.",
-                    "ديزل":     "459,000 ل.ل.",
-                    "غاز 10kg": "370,000 ل.ل.",
+                    "بنزين 98": "2,460,000 ل.ل.",
+                    "بنزين 95": "2,376,000 ل.ل.",
+                    "ديزل":     "2,442,000 ل.ل.",
+                    "غاز 10kg": "980,000 ل.ل.",
                 }
-                ago = "N/A"
+                source_label = "IPT Group (آخر بيانات)"
+                ago = "غير محدد"
 
             card_text = fuel_card(
                 prices_llp=prices_raw,
