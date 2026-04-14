@@ -3,41 +3,142 @@ import os
 from aiogram import Router, F
 from aiogram.types import (
     Message, CallbackQuery,
-    InlineKeyboardMarkup, InlineKeyboardButton,
-    WebAppInfo,
+    ReplyKeyboardMarkup, KeyboardButton,
+    ReplyKeyboardRemove,
 )
 from aiogram.filters import Command, CommandStart
 
-from config import t, MENU_LABELS, MENU_LAYOUT, get_menu_label, settings
+from config import t, settings
 from database.connection import get_session
 from database.crud import CRUDManager
 
 logger = logging.getLogger(__name__)
 router = Router(name="start")
 
-# TWA URL ─ resolves to Render external URL + /static/menu.html
-_BASE_URL = os.environ.get("RENDER_EXTERNAL_URL", "").rstrip("/")
-TWA_MENU_URL = f"{_BASE_URL}/static/menu.html" if _BASE_URL else ""
+# ── Reply Keyboard layout ─────────────────────────────────────────────────────
+# Bilingual button labels. The text sent to the bot is the Arabic or English label.
+_KB_AR = [
+    ["⛽ محروقات",  "🌤 طقس",      "🥇 ذهب"],
+    ["💱 عملة",     "₿ كريبتو",   "📈 أسهم"],
+    ["📰 أخبار",   "⚽ كرة قدم",  "🎬 أفلام"],
+    ["🤖 ذكاء اصطناعي", "🎨 شعار", "📄 CV"],
+    ["✈️ رحلات",   "🌍 زلازل",   "⚙️ إعدادات"],
+]
+_KB_EN = [
+    ["⛽ Fuel",     "🌤 Weather",  "🥇 Gold"],
+    ["💱 Currency", "₿ Crypto",   "📈 Stocks"],
+    ["📰 News",     "⚽ Football", "🎬 Movies"],
+    ["🤖 AI Chat",  "🎨 Logo",    "📄 CV"],
+    ["✈️ Flights",  "🌍 Quakes",  "⚙️ Settings"],
+]
+
+# Flat lookup: button text → internal key (for routing)
+_BTN_MAP: dict[str, str] = {}
+for _row in _KB_AR:
+    for _lbl in _row:
+        _key = _lbl.split()[-1].lower()  # last word as key
+        _BTN_MAP[_lbl] = _key
+for _row in _KB_EN:
+    for _lbl in _row:
+        _key = _lbl.split()[-1].lower()
+        _BTN_MAP[_lbl] = _key
+
+# Extra exact mappings for ambiguous labels
+_BTN_MAP.update({
+    "⛽ محروقات": "fuel",    "⛽ Fuel": "fuel",
+    "🌤 طقس": "weather",     "🌤 Weather": "weather",
+    "🥇 ذهب": "gold",        "🥇 Gold": "gold",
+    "💱 عملة": "currency",   "💱 Currency": "currency",
+    "₿ كريبتو": "crypto",    "₿ Crypto": "crypto",
+    "📈 أسهم": "stocks",     "📈 Stocks": "stocks",
+    "📰 أخبار": "news",      "📰 News": "news",
+    "⚽ كرة قدم": "football","⚽ Football": "football",
+    "🎬 أفلام": "movies",    "🎬 Movies": "movies",
+    "🤖 ذكاء اصطناعي": "ai","🤖 AI Chat": "ai",
+    "🎨 شعار": "logo",       "🎨 Logo": "logo",
+    "📄 CV": "cv",
+    "✈️ رحلات": "flights",  "✈️ Flights": "flights",
+    "🌍 زلازل": "quakes",   "🌍 Quakes": "quakes",
+    "⚙️ إعدادات": "settings","⚙️ Settings": "settings",
+})
 
 
-def _build_main_menu(lang: str = "en") -> InlineKeyboardMarkup:
-    from config import MENU_LAYOUT, get_menu_label
-    buttons = []
-    for row in MENU_LAYOUT:
-        btn_row = [InlineKeyboardButton(text=get_menu_label(key, lang), callback_data=f"menu:{key}") for key in row]
-        buttons.append(btn_row)
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
+def _build_reply_keyboard(lang: str = "en") -> ReplyKeyboardMarkup:
+    layout = _KB_AR if lang == "ar" else _KB_EN
+    rows = [[KeyboardButton(text=lbl) for lbl in row] for row in layout]
+    return ReplyKeyboardMarkup(
+        keyboard=rows,
+        resize_keyboard=True,
+        persistent=True,
+        input_field_placeholder="اكتب رسالتك..." if lang == "ar" else "Type a message...",
+    )
 
 
-def _build_twa_button(lang: str = "en") -> InlineKeyboardMarkup:
-    """Return a keyboard with one button that opens the TWA menu."""
-    label = "📋 القائمة" if lang == "ar" else "📋 Menu"
-    if TWA_MENU_URL:
-        btn = InlineKeyboardButton(text=label, web_app=WebAppInfo(url=TWA_MENU_URL))
-    else:
-        # Fallback: inline menu if TWA URL not set
-        btn = InlineKeyboardButton(text=label, callback_data="menu:home")
-    return InlineKeyboardMarkup(inline_keyboard=[[btn]])
+async def _dispatch_key(message: Message, key: str, lang: str) -> None:
+    """Route a menu key to the correct handler."""
+    try:
+        if key == "fuel":
+            from handlers.fuel import cmd_fuel
+            await cmd_fuel(message, lang=lang)
+        elif key == "weather":
+            hint = "🌤 أرسل اسم المدينة — مثال: بيروت" if lang == "ar" else "🌤 Send a city name — e.g. Beirut"
+            await message.answer(hint)
+        elif key == "gold":
+            from handlers.gold import cmd_gold
+            await cmd_gold(message, lang=lang)
+        elif key == "currency":
+            from handlers.currency import cmd_currency
+            await cmd_currency(message, lang=lang)
+        elif key == "crypto":
+            from handlers.crypto import cmd_crypto
+            await cmd_crypto(message, lang=lang)
+        elif key == "stocks":
+            hint = "📈 أرسل رمز السهم — مثال: AAPL" if lang == "ar" else "📈 Send a stock symbol — e.g. AAPL"
+            await message.answer(hint)
+        elif key == "news":
+            from handlers.news import cmd_news
+            await cmd_news(message, lang=lang)
+        elif key == "football":
+            from handlers.football import cmd_football
+            await cmd_football(message, lang=lang)
+        elif key == "movies":
+            from handlers.movies import cmd_movie
+            await cmd_movie(message, lang=lang)
+        elif key == "ai":
+            hint = "🤖 اكتب سؤالك مباشرةً!" if lang == "ar" else "🤖 Just type your question!"
+            await message.answer(hint)
+        elif key == "logo":
+            from handlers.logo_generator import cmd_logo
+            await cmd_logo(message, lang=lang)
+        elif key == "cv":
+            from handlers.cv_generator import cmd_cv
+            from aiogram.fsm.context import FSMContext
+            # Can't inject FSMContext here; instruct user to type /cv
+            hint = "📄 اكتب /cv لبدء إنشاء سيرتك الذاتية" if lang == "ar" else "📄 Type /cv to start your CV"
+            await message.answer(hint)
+        elif key == "flights":
+            hint = "✈️ أرسل رمز المطار — مثال: BEY" if lang == "ar" else "✈️ Send airport code — e.g. BEY"
+            await message.answer(hint)
+        elif key == "quakes":
+            from api_clients.omega_quakes import omega_quakes
+            await message.answer("🌍 ..." if lang != "ar" else "🌍 جارٍ الجلب...")
+            result = await omega_quakes.get_recent(min_magnitude=4.0, limit=8)
+            if result.get("error") or not result.get("quakes"):
+                await message.answer(t("error", lang))
+                return
+            lines = ["🌍 *زلازل حديثة (M4+)*\n" if lang == "ar" else "🌍 *Recent Earthquakes (M4+)*\n"]
+            for q in result["quakes"][:8]:
+                mag = q.get("magnitude", 0)
+                place = q.get("place", "Unknown")
+                e = "🟥" if mag >= 6 else ("🟧" if mag >= 5 else "🟨")
+                lines.append(f"{e} M{mag:.1f} — {place}")
+            await message.answer("\n".join(lines), parse_mode="Markdown")
+        elif key == "settings":
+            from handlers.settings import cmd_settings
+            await cmd_settings(message, lang=lang)
+    except Exception as exc:
+        logger.error(f"Menu dispatch error for key={key!r}: {exc}", exc_info=True)
+        await message.answer(t("error", lang))
 
 
 @router.message(CommandStart())
@@ -45,9 +146,7 @@ async def cmd_start(message: Message, lang: str = "en") -> None:
     try:
         name = message.from_user.first_name or "User"
         welcome = t("welcome", lang, name=name)
-        # Show TWA menu button first, then inline grid below
-        markup = _build_twa_button(lang)
-        await message.answer(welcome, reply_markup=markup)
+        await message.answer(welcome, reply_markup=_build_reply_keyboard(lang))
     except Exception as exc:
         logger.error(f"Start error: {exc}", exc_info=True)
         await message.answer(t("error", "en"))
@@ -55,7 +154,8 @@ async def cmd_start(message: Message, lang: str = "en") -> None:
 
 @router.message(Command("menu"))
 async def cmd_menu(message: Message, lang: str = "en") -> None:
-    await message.answer(t("main_menu", "en"), reply_markup=_build_twa_button(lang))
+    label = "اختر خدمة:" if lang == "ar" else "Choose a service:"
+    await message.answer(label, reply_markup=_build_reply_keyboard(lang))
 
 
 @router.message(Command("help"))
@@ -63,125 +163,11 @@ async def cmd_help(message: Message, lang: str = "en") -> None:
     await message.answer(t("help_text", lang), parse_mode="Markdown")
 
 
-@router.callback_query(F.data.startswith("menu:"))
-async def handle_menu_callback(callback: CallbackQuery, lang: str = "en") -> None:
-    action = callback.data.split(":")[1]
-    action_map = {
-        "gold": "/gold", "currency": "/currency", "fuel": "/fuel",
-        "weather": "/weather", "football": "/football", "movies": "/movie",
-        "cv": "/cv", "logo": "/logo", "ai_chat": "/ai",
-        "stocks": "/stock", "crypto": "/crypto", "news": "/news",
-        "flights": "/flight", "quakes": "/quakes", "settings": "/settings",
-    }
-    cmd = action_map.get(action, "/help")
-    await callback.answer()
-    await callback.message.answer(f"Use {cmd} command or just type your request!")
-
-
-# ── TWA data_sent handler ─────────────────────────────────────────────────────
-
-@router.message(F.web_app_data)
-async def handle_menu_selection(message: Message, lang: str = "en") -> None:
-    """Handle button selections sent from the Telegram Web App menu."""
-    data = (message.web_app_data.data or "").strip().lower()
-    logger.info(f"TWA menu selection: {data!r} from user {message.from_user.id}")
-
-    try:
-        if data == "gold":
-            from handlers.gold import cmd_gold
-            await cmd_gold(message, lang=lang)
-
-        elif data == "currency":
-            from handlers.currency import cmd_currency
-            await cmd_currency(message, lang=lang)
-
-        elif data == "fuel":
-            from handlers.fuel import cmd_fuel
-            await cmd_fuel(message, lang=lang)
-
-        elif data == "weather":
-            if lang == "ar":
-                await message.answer("🌤 أرسل اسم المدينة للحصول على الطقس.\nمثال: بيروت")
-            else:
-                await message.answer("🌤 Send a city name to get the weather.\nExample: Beirut")
-
-        elif data == "football":
-            from handlers.football import cmd_football
-            await cmd_football(message, lang=lang)
-
-        elif data == "movies":
-            from handlers.movies import cmd_movie
-            await cmd_movie(message, lang=lang)
-
-        elif data == "cv":
-            from handlers.cv_generator import cmd_cv
-            await cmd_cv(message, lang=lang)
-
-        elif data == "logo":
-            from handlers.logo_generator import cmd_logo
-            await cmd_logo(message, lang=lang)
-
-        elif data == "ai":
-            if lang == "ar":
-                await message.answer("🤖 اكتب سؤالك وسأجيب عليك فوراً!")
-            else:
-                await message.answer("🤖 Ask me anything and I'll answer right away!")
-
-        elif data == "stocks":
-            if lang == "ar":
-                await message.answer("📈 أرسل رمز السهم (مثال: AAPL, TSLA)")
-            else:
-                await message.answer("📈 Send a stock symbol (e.g. AAPL, TSLA)")
-
-        elif data == "crypto":
-            from handlers.crypto import cmd_crypto
-            await cmd_crypto(message, lang=lang)
-
-        elif data == "news":
-            from handlers.news import cmd_news
-            await cmd_news(message, lang=lang)
-
-        elif data == "flights":
-            if lang == "ar":
-                await message.answer("✈️ أرسل رمز المطار أو اسم المدينة (مثال: BEY)")
-            else:
-                await message.answer("✈️ Send an airport code or city (e.g. BEY)")
-
-        elif data == "quakes":
-            # Try dedicated quakes handler first, fall back to inline fetch
-            try:
-                from handlers.quakes import cmd_quakes
-                await cmd_quakes(message, lang=lang)
-            except ImportError:
-                if lang == "ar":
-                    await message.answer("🌍 جارٍ جلب بيانات الزلازل...")
-                else:
-                    await message.answer("🌍 Fetching earthquake data...")
-                from api_clients.omega_quakes import omega_quakes
-                result = await omega_quakes.get_recent(min_magnitude=4.0, limit=10)
-                if result.get("error") or not result.get("quakes"):
-                    await message.answer(t("error", lang))
-                    return
-                quakes = result["quakes"][:10]
-                lines = ["🌍 *Recent Earthquakes (M4+)*\n"]
-                for q in quakes:
-                    mag = q.get("magnitude", 0)
-                    place = q.get("place", "Unknown")
-                    mag_emoji = "🟥" if mag >= 6 else ("🟧" if mag >= 5 else "🟨")
-                    lines.append(f"{mag_emoji} M{mag:.1f} — {place}")
-                await message.answer("\n".join(lines), parse_mode="Markdown")
-
-        elif data == "settings":
-            from handlers.settings import cmd_settings
-            await cmd_settings(message, lang=lang)
-
-        else:
-            logger.warning(f"Unknown TWA menu selection: {data!r}")
-            await message.answer(t("error", lang))
-
-    except Exception as exc:
-        logger.error(f"TWA menu handler error for {data!r}: {exc}", exc_info=True)
-        await message.answer(t("error", lang))
+@router.message(F.text.func(lambda t: t in _BTN_MAP))
+async def handle_menu_button(message: Message, lang: str = "en") -> None:
+    """Intercept reply-keyboard button taps before the AI catch-all."""
+    key = _BTN_MAP[message.text]
+    await _dispatch_key(message, key, lang)
 
 
 def register_start_handlers(dp) -> None:

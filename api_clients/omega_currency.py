@@ -10,6 +10,31 @@ from services.rate_limiter import quota
 logger = logging.getLogger(__name__)
 
 
+# Static fallback rates — used when ALL live APIs are down.
+# Updated manually to reflect approximate real-world rates (April 2024 basis).
+_STATIC_FALLBACK: dict[tuple, float] = {
+    ("USD", "EUR"): 0.921,  ("USD", "GBP"): 0.789,  ("USD", "JPY"): 149.5,
+    ("USD", "CHF"): 0.891,  ("USD", "CAD"): 1.362,  ("USD", "AUD"): 1.529,
+    ("USD", "LBP"): 89500.0,("USD", "SAR"): 3.750,  ("USD", "AED"): 3.672,
+    ("USD", "EGP"): 48.85,  ("USD", "TRY"): 32.5,   ("USD", "JOD"): 0.709,
+    ("USD", "KWD"): 0.307,  ("USD", "QAR"): 3.640,  ("USD", "BHD"): 0.376,
+    ("USD", "OMR"): 0.385,  ("USD", "IQD"): 1310.0, ("USD", "SYP"): 13000.0,
+    ("USD", "MAD"): 9.97,   ("USD", "DZD"): 134.5,  ("USD", "TND"): 3.11,
+    ("EUR", "USD"): 1.085,  ("EUR", "GBP"): 0.857,  ("EUR", "LBP"): 97020.0,
+    ("GBP", "USD"): 1.267,  ("GBP", "EUR"): 1.167,  ("GBP", "LBP"): 113300.0,
+}
+
+def _static_fallback(base: str, target: str) -> float | None:
+    """Look up a static fallback rate, trying direct and reverse."""
+    direct = _STATIC_FALLBACK.get((base, target))
+    if direct is not None:
+        return direct
+    rev = _STATIC_FALLBACK.get((target, base))
+    if rev:
+        return round(1.0 / rev, 6)
+    return None
+
+
 class OmegaCurrency:
     """Currency exchange with multi-source fusion and parallel market rates."""
 
@@ -50,6 +75,15 @@ class OmegaCurrency:
                 result["stale"] = True
                 result["age_minutes"] = stale.get("age_minutes", 0)
                 return result
+            # Static offline fallback — better than a hard error
+            fb = _static_fallback(base, target)
+            if fb is not None:
+                logger.info(f"Using static fallback for {base}/{target}: {fb}")
+                return {
+                    "base": base, "target": target, "rate": fb,
+                    "sources_count": 0, "error": False,
+                    "stale": True, "stale_note": "offline_fallback",
+                }
             return {"error": True, "message": "No rate data available"}
 
         values = [r["rate"] for r in rates]

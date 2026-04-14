@@ -92,17 +92,18 @@ async def cmd_fuel(message: Message, lang: str = "en") -> None:
         # ── Lebanon: render the rich visual card ──────────────────────────────
         if country == "LB":
             prices_raw = data.get("prices", {}) if not data.get("error") else {}
+            # Filter out non-price meta keys like "note"
+            prices_real = {k: v for k, v in prices_raw.items()
+                           if k != "note" and any(c.isdigit() for c in str(v))}
 
             # Fetch LBP/USD rate
             rate = await _fetch_exchange_rate()
 
-            # Determine data age / source
             source_label = "IPT Group"
             ago = "—"
-            if data.get("error") or not prices_raw:
-                # Fallback: last-known IPT Group prices (updated weekly by BDL)
-                # These are from the latest verified IPT Group publication.
-                prices_raw = {
+            if not prices_real:
+                # Fallback: last verified IPT Group weekly prices
+                prices_real = {
                     "بنزين 98": "2,460,000 ل.ل.",
                     "بنزين 95": "2,376,000 ل.ل.",
                     "ديزل":     "2,442,000 ل.ل.",
@@ -112,7 +113,7 @@ async def cmd_fuel(message: Message, lang: str = "en") -> None:
                 ago = "غير محدد"
 
             card_text = fuel_card(
-                prices_llp=prices_raw,
+                prices_llp=prices_real,
                 rate=rate,
                 lang=lang,
                 source=source_label,
