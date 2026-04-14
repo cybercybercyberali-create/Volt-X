@@ -24,6 +24,7 @@ class OmegaNews:
         if cached:
             return cached
 
+        result = None  # initialise before conditional branches
         # Limited APIs first (auto-restore when quota renews)
         if quota.has_quota("newsapi"):
             result = await self._fetch_newsapi(category, country)
@@ -105,15 +106,20 @@ class OmegaNews:
         return None
 
     async def _fetch_rss(self, lang: str) -> Optional[dict]:
-        """Fetch from RSS feeds as fallback."""
+        """Fetch from RSS feeds as fallback. Uses xml.etree for correct XML parsing."""
+        import xml.etree.ElementTree as ET
+        import html as html_mod
+
         feeds = {
             "en": [
                 "https://feeds.bbci.co.uk/news/rss.xml",
-                "http://feeds.reuters.com/reuters/topNews",
+                "https://feeds.reuters.com/reuters/topNews",
+                "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml",
             ],
             "ar": [
                 "https://www.aljazeera.net/aljazeerarss/a7c186be-1baa-4bd4-9d80-a84db769f779/73d0e1b4-532f-45ef-b135-bfdff8b8cab9",
                 "https://www.bbc.com/arabic/rss.xml",
+                "https://arabic.rt.com/rss/",
             ],
         }
 
@@ -122,19 +128,46 @@ class OmegaNews:
 
         for url in rss_urls:
             try:
-                html = await self._rss.fetch_html(url)
-                if html:
-                    from bs4 import BeautifulSoup
-                    soup = BeautifulSoup(html, "lxml")
-                    items = soup.find_all("item")[:10]
-                    for item in items:
-                        articles.append({
-                            "title": item.find("title").get_text(strip=True) if item.find("title") else "",
-                            "description": item.find("description").get_text(strip=True)[:200] if item.find("description") else "",
-                            "url": item.find("link").get_text(strip=True) if item.find("link") else "",
-                            "source": "RSS",
-                            "published_at": item.find("pubDate").get_text(strip=True) if item.find("pubDate") else "",
-                        })
+                raw = await self._rss.fetch_html(url)
+                if not raw or len(raw) < 200:
+                    continue
+
+                # Strip any BOM or XML declaration that may confuse ET
+                raw_clean = raw.strip()
+                if raw_clean.startswith('\ufeff'):
+                    raw_clean = raw_clean[1:]
+
+                # Parse as proper XML
+                root = ET.fromstring(raw_clean)
+                # RSS items can be at channel/item or directly at item
+                items = root.findall('.//item')[:10]
+                for item in items:
+                    def _text(tag):
+                        el = item.find(tag)
+                        if el is None:
+                            return ""
+                        txt = (el.text or "").strip()
+                        # Unwrap CDATA if present
+                        return html_mod.unescape(txt)
+
+                    title = _text("title")
+                    if not title:
+                        continue
+                    link = _text("link")
+                    # link may be in a different namespace or as text after <link/>
+                    if not link:
+                        link_el = item.find("link")
+                        if link_el is not None:
+                            link = (link_el.tail or "").strip()
+                    articles.append({
+                        "title": title[:120],
+                        "description": _text("description")[:200],
+                        "url": link,
+                        "source": "RSS",
+                        "published_at": _text("pubDate"),
+                    })
+                if articles:
+                    break  # got enough from first working feed
             except Exception as exc:
                 logger.debug(f"RSS error for {url}: {exc}")
 
