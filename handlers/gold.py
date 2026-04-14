@@ -4,6 +4,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from aiogram.filters import Command
 
 from api_clients.omega_metals import omega_metals
+from services.cards import gold_card
 from config import GOLD_KARATS, METAL_NAMES, t
 
 logger = logging.getLogger(__name__)
@@ -19,15 +20,35 @@ async def cmd_gold(message: Message, lang: str = "en") -> None:
             await message.answer(t("error", lang))
             return
 
-        price = f"{data['price_per_ounce']:,.2f}"
-        text = t("gold_price", lang).replace("{price}", price)
-        if data.get("stale"):
-            text += f"\n\n⏰ {data.get('age_minutes', 0)} min ago"
+        # Enrich data with silver + platinum for the card
+        try:
+            ag = await omega_metals.get_prices("XAG", "USD")
+            if not ag.get("error"):
+                data["silver_per_ounce"] = ag.get("price_per_ounce", 0)
+        except Exception:
+            pass
+        try:
+            pt = await omega_metals.get_prices("XPT", "USD")
+            if not pt.get("error"):
+                data["platinum_per_ounce"] = pt.get("price_per_ounce", 0)
+        except Exception:
+            pass
+
+        text = gold_card(data, lang)
+        # Add karat detail if available
+        if data.get("karats"):
+            sep = "━━━━━━━━━━━━━━"
+            karat_lines = [f"\n{sep}"]
+            karat_label = "💛 أسعار الكيلو غرام" if lang == "ar" else "💛 Karat Prices (per gram)"
+            karat_lines.append(karat_label)
+            for k in ["24K", "22K", "21K", "18K", "14K", "9K"]:
+                if k in data["karats"]:
+                    karat_lines.append(f"  {k}: **${data['karats'][k]['per_gram']:,.2f}**")
+            text += "\n".join(karat_lines)
 
         buttons = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text=t("gold_karats_btn", lang), callback_data="gold:karats"),
-             InlineKeyboardButton(text=t("btn_refresh", lang), callback_data="gold:refresh")],
-            [InlineKeyboardButton(text=t("btn_silver", lang), callback_data="metal:XAG"),
+            [InlineKeyboardButton(text=t("btn_refresh", lang), callback_data="gold:refresh"),
+             InlineKeyboardButton(text=t("btn_silver", lang), callback_data="metal:XAG"),
              InlineKeyboardButton(text=t("btn_platinum", lang), callback_data="metal:XPT")],
         ])
         await message.answer(text, parse_mode="Markdown", reply_markup=buttons)
