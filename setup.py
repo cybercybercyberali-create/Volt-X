@@ -4818,17 +4818,19 @@ class OmegaFootball:
         league_info = MAJOR_LEAGUES.get(league_code.upper())
         if not league_info:
             return {"error": True, "message": "Unknown league"}
-        league_id = league_info["id"]
-        cache_key = f"apifb:fixtures:{league_code}:{status}"
+        league_id   = league_info["id"]
+        league_code_up = league_code.upper()
+        cache_key = f"apifb:fixtures:{league_code_up}:{status}"
         ttl = CACHE_TTL.get("football_live", 60) if status.upper() == "LIVE" else CACHE_TTL.get("football_static", 3600)
         cached = await cache.get(cache_key)
         if cached is not None:
             return cached
 
-        # Try API-Football when key is available
+        from datetime import date, timedelta
+        today = date.today()
+
+        # Source 1 — API-Football (RapidAPI)
         if settings.api_football_key:
-            from datetime import date, timedelta
-            today = date.today()
             params: dict[str, Any] = {"league": league_id, "season": CURRENT_SEASON}
             if status.upper() == "LIVE":
                 params["live"] = "all"
@@ -4839,13 +4841,18 @@ class OmegaFootball:
                 params["to"]   = (today + timedelta(days=4)).isoformat()
             data = await self._get("/fixtures", params)
             if data and "response" in data:
-                fixtures = [_normalize_fixture(f, league_code.upper()) for f in data["response"]]
+                fixtures = [_normalize_fixture(f, league_code_up) for f in data["response"]]
                 await cache.set(cache_key, fixtures, ttl=ttl)
                 return fixtures
 
-        # Sofascore fallback — fetch today ± 2 days
-        from datetime import date, timedelta
-        today = date.today()
+        # Source 2 — football-data.org (free key)
+        if settings.football_data_key:
+            fd_fixtures = await self._fetch_football_data(league_code_up, today, timedelta)
+            if fd_fixtures:
+                await cache.set(cache_key, fd_fixtures, ttl=ttl)
+                return fd_fixtures
+
+        # Source 3 — Sofascore (no key, always free)
         all_fixtures: list[dict] = []
         for delta in (0, -1, 1, -2, 2):
             d = (today + timedelta(days=delta)).strftime("%Y-%m-%d")
@@ -4860,6 +4867,64 @@ class OmegaFootball:
         if stale and stale.get("data"):
             return stale["data"]
         return {"error": True}
+
+    async def _fetch_football_data(self, league_code: str, today, timedelta) -> list:
+        """Fetch from football-data.org v4 (free key)."""
+        # football-data.org uses competition codes directly
+        _FD_CODES = {
+            "PL": "PL", "PD": "PD", "SA": "SA",
+            "BL1": "BL1", "FL1": "FL1", "CL": "CL",
+        }
+        fd_code = _FD_CODES.get(league_code)
+        if not fd_code:
+            return []
+        date_from = (today - timedelta(days=3)).strftime("%Y-%m-%d")
+        date_to   = (today + timedelta(days=4)).strftime("%Y-%m-%d")
+        url = f"https://api.football-data.org/v4/competitions/{fd_code}/matches"
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.get(
+                    url,
+                    params={"dateFrom": date_from, "dateTo": date_to},
+                    headers={"X-Auth-Token": settings.football_data_key},
+                )
+                if r.status_code != 200:
+                    logger.debug(f"football-data.org {r.status_code}")
+                    return []
+                matches = r.json().get("matches", [])
+                fixtures = []
+                for m in matches:
+                    home = m.get("homeTeam", {}).get("name", "")
+                    away = m.get("awayTeam", {}).get("name", "")
+                    if not home:
+                        continue
+                    score = m.get("score", {})
+                    ft    = score.get("fullTime", {})
+                    status_raw = m.get("status", "SCHEDULED")
+                    _ST = {
+                        "SCHEDULED": "NS", "TIMED": "NS", "IN_PLAY": "1H",
+                        "PAUSED": "HT", "FINISHED": "FT",
+                        "POSTPONED": "PST", "CANCELLED": "CANC",
+                    }
+                    league_info = MAJOR_LEAGUES.get(league_code, {})
+                    fixtures.append({
+                        "fixture_id":     m.get("id"),
+                        "league":         league_info.get("name", fd_code),
+                        "league_ar":      league_info.get("name_ar", fd_code),
+                        "home":           home,
+                        "away":           away,
+                        "home_score":     ft.get("home"),
+                        "away_score":     ft.get("away"),
+                        "status":         _ST.get(status_raw, status_raw[:3]),
+                        "status_elapsed": m.get("minute"),
+                        "venue":          m.get("venue", ""),
+                        "date_utc":       m.get("utcDate", ""),
+                        "source":         "football-data.org",
+                    })
+                return fixtures
+        except Exception as exc:
+            logger.warning(f"football-data.org error: {exc}")
+            return []
 
     async def get_standings(self, league_code: str) -> dict:
         league_info = MAJOR_LEAGUES.get(league_code.upper())
