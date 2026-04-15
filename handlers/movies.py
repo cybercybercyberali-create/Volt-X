@@ -1,4 +1,6 @@
 import logging
+import re
+
 from aiogram import Router
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
@@ -9,81 +11,143 @@ from config import t
 logger = logging.getLogger(__name__)
 router = Router(name="movies")
 
+_YEAR_RE = re.compile(r"\b(19[0-9]{2}|20[0-9]{2})\b")
+
+
+def _extract_year(text: str) -> tuple:
+    m = _YEAR_RE.search(text)
+    if m:
+        return _YEAR_RE.sub("", text).strip(), int(m.group(1))
+    return text, None
+
+
+def _item_year(item: dict) -> int | None:
+    rd = item.get("release_date", "")
+    try:
+        return int(rd[:4]) if rd else None
+    except ValueError:
+        return None
+
+
+def _caption(item: dict) -> str:
+    title = item.get("title", "")
+    rd = item.get("release_date", "")
+    year = rd[:4] if rd else "?"
+    vote = item.get("vote_average", 0)
+    genres = item.get("genres", [])
+    genres_str = ", ".join(genres) if isinstance(genres, list) and genres else "—"
+    overview = item.get("overview", "")
+    preview = overview[:180] + ("..." if len(overview) > 180 else "")
+    return (
+        f"🎬 *{title}* ({year})\n"
+        f"⭐ {vote}/10  |  🎭 {genres_str}\n"
+        f"📅 {rd}\n"
+        f"📝 {preview}"
+    )
+
+
+async def _send_card(msg: Message, item: dict, lang: str) -> None:
+    poster = item.get("poster", "")
+    cap = _caption(item)
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(
+            text=t("btn_details", lang),
+            callback_data=f"mv:detail:{item['id']}:{item.get('media_type','movie')}",
+        )
+    ]])
+    try:
+        if poster:
+            await msg.answer_photo(photo=poster, caption=cap, parse_mode="Markdown", reply_markup=kb)
+            return
+    except Exception:
+        pass
+    await msg.answer(cap, parse_mode="Markdown", reply_markup=kb)
+
 
 @router.message(Command("movie"))
 async def cmd_movie(message: Message, lang: str = "en") -> None:
-    query = message.text.replace("/movie", "").strip() if message.text else ""
-    if not query:
-        data = await omega_movies.get_trending()
-        if data.get("error"):
-            await message.answer(t("error", lang))
-            return
-        text = t("trending_title", lang) + "\n\n"
-        for i, item in enumerate(data["results"][:10], 1):
-            stars = "⭐" * min(int(item.get("vote_average", 0) / 2), 5)
-            text += f"{i}. **{item['title']}** {stars}\n"
-            text += f"   📅 {item.get('release_date', 'N/A')} | 🎭 {item.get('media_type', '')}\n\n"
-        text += t("search_hint", lang)
-        await message.answer(text, parse_mode="Markdown")
-        return
+    raw = message.text.replace("/movie", "", 1).strip() if message.text else ""
 
-    await message.answer(t("fetching", lang))
-    try:
-        data = await omega_movies.search(query)
+    if not raw:
+        data = await omega_movies.get_trending()
         if data.get("error") or not data.get("results"):
             await message.answer(t("error", lang))
             return
+        for item in data["results"][:5]:
+            await _send_card(message, item, lang)
+        return
 
-        for item in data["results"][:3]:
-            text = f"🎬 **{item['title']}**\n"
-            text += f"{t('label_rating', lang)}: {item.get('vote_average', 'N/A')}/10\n"
-            text += f"📅 {item.get('release_date', 'N/A')}\n"
-            text += f"📝 {item.get('overview', '')[:200]}\n"
+    query, requested_year = _extract_year(raw)
+    if not query:
+        query = raw
 
-            buttons = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text=t("btn_details", lang), callback_data=f"mv:detail:{item['id']}:{item.get('media_type', 'movie')}"),
-                 InlineKeyboardButton(text=t("btn_favorite", lang), callback_data=f"mv:watch:{item['id']}:{item.get('media_type', 'movie')}")],
-            ])
-            await message.answer(text, parse_mode="Markdown", reply_markup=buttons)
+    try:
+        data = await omega_movies.search(query)
+        if data.get("error") or not data.get("results"):
+            await message.answer(t("not_found", lang))
+            return
+
+        results = data["results"]
+        if requested_year is not None:
+            filtered = [r for r in results if _item_year(r) == requested_year]
+            if not filtered:
+                await message.answer(
+                    f"❌ لا توجد أفلام موثّقة في {requested_year}\n"
+                    f"No verified {requested_year} movies found."
+                )
+                return
+            results = filtered
+
+        for item in results[:3]:
+            await _send_card(message, item, lang)
+
     except Exception as exc:
         logger.error(f"Movie error: {exc}", exc_info=True)
         await message.answer(t("error", lang))
 
 
-@router.callback_query(lambda c: c.data.startswith("mv:"))
-async def handle_movie_cb(callback: CallbackQuery, lang: str = "en") -> None:
+@router.callback_query(lambda c: c.data and c.data.startswith("mv:"))
+async def handle_mv_cb(callback: CallbackQuery, lang: str = "en") -> None:
     parts = callback.data.split(":")
-    action = parts[1]
     await callback.answer()
+    if parts[1] != "detail" or len(parts) < 4:
+        return
+    try:
+        tmdb_id, media_type = int(parts[2]), parts[3]
+    except (ValueError, IndexError):
+        return
 
-    if action == "detail" and len(parts) >= 4:
-        tmdb_id = int(parts[2])
-        media_type = parts[3]
-        data = await omega_movies.get_details(tmdb_id, media_type)
-        if data.get("error"):
-            await callback.message.answer(t("error", lang))
-            return
-        text = f"🎬 **{data['title']}**\n"
-        if data.get("tagline"):
-            text += f"_\"{data['tagline']}\"_\n"
-        text += f"\n⭐ TMDB: {data.get('vote_average', 'N/A')}/10"
-        if data.get("imdb_rating") and data["imdb_rating"] != "N/A":
-            text += f" | IMDb: {data['imdb_rating']}"
-        if data.get("rotten_tomatoes") and data["rotten_tomatoes"] != "N/A":
-            text += f" | 🍅 {data['rotten_tomatoes']}"
-        text += f"\n📅 {data.get('release_date', 'N/A')}"
-        if data.get("runtime"):
-            text += f" | ⏱ {data['runtime']} min"
-        text += f"\n🎭 {', '.join(data.get('genres', []))}\n"
-        if data.get("director"):
-            text += f"{t('label_director', lang)}: {data['director']}\n"
-        if data.get("cast"):
-            cast_names = [c['name'] for c in data['cast'][:5]]
-            text += f"{t('label_cast', lang)}: {', '.join(cast_names)}\n"
-        text += f"\n📝 {data.get('overview', '')[:300]}"
-        if data.get("trailer_url"):
-            text += f"\n\n🎥 [Trailer]({data['trailer_url']})"
-        await callback.message.answer(text, parse_mode="Markdown")
+    data = await omega_movies.get_details(tmdb_id, media_type)
+    if data.get("error"):
+        await callback.message.answer(t("error", lang))
+        return
+
+    title = data.get("title", "")
+    rd = data.get("release_date", "")
+    year = rd[:4] if rd else "?"
+    vote = data.get("vote_average", 0)
+    genres = ", ".join(data.get("genres", []))
+    overview = data.get("overview", "")[:180]
+
+    text = (
+        f"🎬 *{title}* ({year})\n"
+        f"⭐ {vote}/10  |  🎭 {genres}\n"
+        f"📅 {rd}"
+    )
+    if data.get("runtime"):
+        text += f"  |  ⏱ {data['runtime']} min"
+    if data.get("tagline"):
+        text += f"\n\n_{data['tagline']}_"
+    if data.get("director"):
+        text += f"\n\n🎬 {t('label_director', lang)}: {data['director']}"
+    if data.get("cast"):
+        names = ", ".join(c["name"] for c in data["cast"][:5])
+        text += f"\n🌟 {t('label_cast', lang)}: {names}"
+    text += f"\n\n📝 {overview}"
+    if data.get("trailer_url"):
+        text += f"\n\n🎥 [Trailer]({data['trailer_url']})"
+
+    await callback.message.answer(text, parse_mode="Markdown")
 
 
 def register_movies_handlers(dp) -> None:

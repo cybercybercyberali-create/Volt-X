@@ -295,31 +295,6 @@ async def _route_to_service(message: Message, query: str, lang: str) -> bool:
             await message.answer(t("error", lang))
             return True
 
-    # Logo generation
-    _LOGO_KW = {"لوغو", "logo", "شعار", "صمم لوغو", "اعمل لوغو", "make logo", "design logo"}
-    if _has_kw(query, _LOGO_KW):
-        try:
-            brand = query
-            for kw in ("لوغو", "شعار", "logo", "صمم", "اعمل", "make", "design", "لشركة", "لـ", "for", "a logo", "الشركة"):
-                brand = re.sub(re.escape(kw), " ", brand, flags=re.IGNORECASE)
-            brand = " ".join(brand.split()).strip("؟?!.,:\"'") or query
-            await message.answer(t("logo_generating", lang))
-            style_prompt = f"professional minimalist logo for {brand}, flat design, vector style, white background"
-            encoded = urllib.parse.quote(style_prompt)
-            img_url = f"https://image.pollinations.ai/prompt/{encoded}?width=512&height=512&nologo=true"
-            caption = f"🎨 **{brand}**\n\n_AI-generated logo concept_"
-            await message.answer_photo(img_url, caption=caption, parse_mode="Markdown")
-            return True
-        except Exception as exc:
-            logger.debug(f"Logo routing error: {exc}")
-            try:
-                encoded = urllib.parse.quote(f"professional logo {query} white background")
-                img_url = f"https://image.pollinations.ai/prompt/{encoded}?width=512&height=512"
-                await message.answer(f"🎨 **{query}**\n\n[View logo]({img_url})", parse_mode="Markdown")
-            except Exception:
-                await message.answer(t("error", lang))
-            return True
-
     return False
 
 

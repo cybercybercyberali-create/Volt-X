@@ -53,6 +53,7 @@ class Settings(BaseSettings):
     tmdb_api_key: str = Field(default="", alias="TMDB_API_KEY")
     openweather_api_key: str = Field(default="", alias="OPENWEATHER_API_KEY")
     football_data_key: str = Field(default="", alias="FOOTBALL_DATA_KEY")
+    api_football_key: str = Field(default="", alias="API_FOOTBALL_KEY")
     metals_api_key: str = Field(default="", alias="METALS_API_KEY")
     goldapi_key: str = Field(default="", alias="GOLDAPI_KEY")
     exchange_rate_key: str = Field(default="", alias="EXCHANGE_RATE_KEY")

@@ -107,14 +107,8 @@ async def _dispatch_key(message: Message, key: str, lang: str) -> None:
         elif key == "ai":
             hint = "🤖 اكتب سؤالك مباشرةً!" if lang == "ar" else "🤖 Just type your question!"
             await message.answer(hint)
-        elif key == "logo":
-            from handlers.logo_generator import cmd_logo
-            await cmd_logo(message, lang=lang)
-        elif key == "cv":
-            from handlers.cv_generator import cmd_cv
-            from aiogram.fsm.context import FSMContext
-            # Can't inject FSMContext here; instruct user to type /cv
-            hint = "📄 اكتب /cv لبدء إنشاء سيرتك الذاتية" if lang == "ar" else "📄 Type /cv to start your CV"
+        elif key in ("logo", "cv"):
+            hint = "🤖 اكتب سؤالك مباشرةً!" if lang == "ar" else "🤖 Just type your question!"
             await message.answer(hint)
         elif key == "flights":
             hint = "✈️ أرسل رمز المطار — مثال: BEY" if lang == "ar" else "✈️ Send airport code — e.g. BEY"

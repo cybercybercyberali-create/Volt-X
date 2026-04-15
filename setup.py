@@ -32,6 +32,7 @@ lxml==5.2.2
 reportlab==4.2.0
 Pillow==10.3.0
 aiofiles==23.2.1
+feedparser==6.0.11
 diskcache==5.6.3
 redis[hiredis]==5.0.7
 yfinance==0.2.40
@@ -53,7 +54,7 @@ OPENROUTER_API_KEY=your_openrouter_key
 COHERE_API_KEY=your_cohere_key
 TMDB_API_KEY=your_tmdb_key
 OPENWEATHER_API_KEY=your_openweather_key
-FOOTBALL_DATA_KEY=your_football_data_key
+API_FOOTBALL_KEY=your_rapidapi_key_for_api-football
 METALS_API_KEY=your_metals_api_key
 EXCHANGE_RATE_KEY=your_exchange_rate_key
 
@@ -165,6 +166,7 @@ class Settings(BaseSettings):
     tmdb_api_key: str = Field(default="", alias="TMDB_API_KEY")
     openweather_api_key: str = Field(default="", alias="OPENWEATHER_API_KEY")
     football_data_key: str = Field(default="", alias="FOOTBALL_DATA_KEY")
+    api_football_key: str = Field(default="", alias="API_FOOTBALL_KEY")
     metals_api_key: str = Field(default="", alias="METALS_API_KEY")
     goldapi_key: str = Field(default="", alias="GOLDAPI_KEY")
     exchange_rate_key: str = Field(default="", alias="EXCHANGE_RATE_KEY")
@@ -4681,269 +4683,162 @@ omega_weather = OmegaWeather()
 
 FILES["api_clients/omega_football.py"] = r'''
 import logging
+from datetime import datetime, timezone
 from typing import Any, Optional
 
-from api_clients.base_client import BaseAPIClient
+import httpx
+
 from config import settings, CACHE_TTL
 from services.cache_service import cache
-from services.rate_limiter import quota
 
 logger = logging.getLogger(__name__)
 
+BASE = "https://api-football-v1.p.rapidapi.com/v3"
+CURRENT_SEASON = 2024
+
 MAJOR_LEAGUES = {
-    "PL": {"name": "Premier League", "name_ar": "الدوري الإنجليزي", "country": "England"},
-    "PD": {"name": "La Liga", "name_ar": "الدوري الإسباني", "country": "Spain"},
-    "SA": {"name": "Serie A", "name_ar": "الدوري الإيطالي", "country": "Italy"},
-    "BL1": {"name": "Bundesliga", "name_ar": "الدوري الألماني", "country": "Germany"},
-    "FL1": {"name": "Ligue 1", "name_ar": "الدوري الفرنسي", "country": "France"},
-    "CL": {"name": "Champions League", "name_ar": "دوري أبطال أوروبا", "country": "Europe"},
-    "SPL": {"name": "Saudi Pro League", "name_ar": "دوري روشن", "country": "Saudi Arabia"},
-    "ELC": {"name": "Championship", "name_ar": "الدوري الإنجليزي الدرجة الأولى", "country": "England"},
+    "PL":  {"id": 39,  "name": "Premier League",        "name_ar": "الدوري الإنجليزي",       "country": "England"},
+    "PD":  {"id": 140, "name": "La Liga",               "name_ar": "الدوري الإسباني",        "country": "Spain"},
+    "SA":  {"id": 135, "name": "Serie A",               "name_ar": "الدوري الإيطالي",        "country": "Italy"},
+    "BL1": {"id": 78,  "name": "Bundesliga",            "name_ar": "الدوري الألماني",        "country": "Germany"},
+    "FL1": {"id": 61,  "name": "Ligue 1",               "name_ar": "الدوري الفرنسي",         "country": "France"},
+    "CL":  {"id": 2,   "name": "Champions League",      "name_ar": "دوري أبطال أوروبا",      "country": "Europe"},
+    "SPL": {"id": 307, "name": "Saudi Pro League",      "name_ar": "دوري روشن",              "country": "Saudi Arabia"},
+    "ELC": {"id": 40,  "name": "Championship",          "name_ar": "دوري الدرجة الأولى",     "country": "England"},
 }
 
 
+def _headers() -> dict:
+    return {
+        "X-RapidAPI-Key": settings.api_football_key,
+        "X-RapidAPI-Host": "api-football-v1.p.rapidapi.com",
+    }
+
+
+def _normalize_fixture(fixture: dict, league_code: str) -> dict:
+    f = fixture.get("fixture", {})
+    teams = fixture.get("teams", {})
+    goals = fixture.get("goals", {})
+    status = f.get("status", {})
+    venue = f.get("venue", {})
+    league_info = MAJOR_LEAGUES.get(league_code, {})
+    return {
+        "fixture_id": f.get("id"),
+        "league": league_info.get("name", league_code),
+        "league_ar": league_info.get("name_ar", league_code),
+        "home": teams.get("home", {}).get("name", ""),
+        "away": teams.get("away", {}).get("name", ""),
+        "home_score": goals.get("home"),
+        "away_score": goals.get("away"),
+        "status": status.get("short", "NS"),
+        "status_elapsed": status.get("elapsed"),
+        "venue": venue.get("name", ""),
+        "date_utc": f.get("date", ""),
+    }
+
+
 class OmegaFootball:
-    """Football data with multi-source fusion (football-data.org + ESPN + TheSportsDB)."""
 
-    def __init__(self):
-        self._football_data = BaseAPIClient("football_data", "https://api.football-data.org/v4")
-        self._espn = BaseAPIClient("espn_football", "https://site.api.espn.com/apis/site/v2/sports/soccer")
-        self._sportsdb = BaseAPIClient("thesportsdb", "https://www.thesportsdb.com/api/v1/json")
+    async def _get(self, path: str, params: dict) -> Optional[dict]:
+        if not settings.api_football_key:
+            return None
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(f"{BASE}{path}", params=params, headers=_headers())
+                resp.raise_for_status()
+                return resp.json()
+        except Exception as exc:
+            logger.warning(f"api-football error: {exc}")
+            return None
 
-    async def get_standings(self, league: str = "PL") -> dict[str, Any]:
-        """Get league standings with multi-source fusion."""
-        cache_key = f"football:standings:{league}"
+    async def get_fixtures(self, league_code: str, status: str = "all") -> list | dict:
+        league_info = MAJOR_LEAGUES.get(league_code.upper())
+        if not league_info:
+            return {"error": True, "message": "Unknown league"}
+        league_id = league_info["id"]
+        cache_key = f"apifb:fixtures:{league_code}:{status}"
+        ttl = CACHE_TTL.get("football_live", 60) if status.upper() == "LIVE" else CACHE_TTL.get("football_static", 3600)
         cached = await cache.get(cache_key)
-        if cached:
+        if cached is not None:
             return cached
+        params: dict[str, Any] = {"league": league_id, "season": CURRENT_SEASON}
+        if status.upper() not in ("ALL", ""):
+            params["status"] = status.upper()
+        data = await self._get("/fixtures", params)
+        if data and "response" in data:
+            fixtures = [_normalize_fixture(f, league_code.upper()) for f in data["response"]]
+            await cache.set(cache_key, fixtures, ttl=ttl)
+            return fixtures
+        stale = await cache.get_stale(cache_key)
+        if stale and stale.get("data"):
+            return stale["data"]
+        return {"error": True}
 
-        # Limited API first (auto-restores when quota renews)
-        if quota.has_quota("football_data"):
-            result = await self._fetch_fd_standings(league)
-            if result and not result.get("error"):
-                quota.use_quota("football_data")
-
-        # Unlimited ESPN fallback (when football-data exhausted)
-        if not result or result.get("error"):
-            result = await self._fetch_espn_standings(league)
-
-        if result and not result.get("error"):
-            await cache.set(cache_key, result, ttl=CACHE_TTL["football_static"])
-
-        if not result or result.get("error"):
-            stale = await cache.get_stale(cache_key)
-            if stale and stale.get("data"):
-                result = stale["data"]
-                result["stale"] = True
-                return result
-        return result or {"error": True, "message": "Standings unavailable"}
-
-    async def get_matches(self, league: str = "PL", status: str = "SCHEDULED") -> dict[str, Any]:
-        """Get matches for a league."""
-        cache_key = f"football:matches:{league}:{status}"
-        ttl = CACHE_TTL["football_live"] if status == "LIVE" else CACHE_TTL["football_static"]
+    async def get_standings(self, league_code: str) -> dict:
+        league_info = MAJOR_LEAGUES.get(league_code.upper())
+        if not league_info:
+            return {"error": True}
+        league_id = league_info["id"]
+        cache_key = f"apifb:standings:{league_code}"
         cached = await cache.get(cache_key)
-        if cached:
+        if cached is not None:
             return cached
-
-        if quota.has_quota("football_data"):
-            result = await self._fetch_fd_matches(league, status)
-            if result and not result.get("error"):
-                quota.use_quota("football_data")
-
-        if not result or result.get("error"):
-            result = await self._fetch_espn_scores(league)
-
-        if result and not result.get("error"):
-            await cache.set(cache_key, result, ttl=ttl)
-
-        return result or {"error": True, "message": "Matches unavailable"}
-
-    async def get_live_scores(self) -> dict[str, Any]:
-        """Get all live scores across leagues."""
-        cache_key = "football:live"
-        cached = await cache.get(cache_key)
-        if cached:
-            return cached
-
-        scores = await self._fetch_espn_live()
-        if scores:
-            await cache.set(cache_key, scores, ttl=CACHE_TTL["football_live"])
-            return scores
-
-        return {"matches": [], "error": False, "message": "No live matches"}
-
-    async def _fetch_fd_standings(self, league: str) -> Optional[dict]:
-        """Fetch standings from football-data.org."""
-        if not settings.football_data_key:
-            return None
-        try:
-            data = await self._football_data.get(
-                f"/competitions/{league}/standings",
-                headers={"X-Auth-Token": settings.football_data_key},
-            )
-            if data and "standings" in data:
-                standings = []
-                for table in data["standings"]:
-                    if table.get("type") == "TOTAL":
-                        for entry in table.get("table", []):
-                            standings.append({
-                                "position": entry["position"],
-                                "team": entry["team"]["name"],
-                                "team_crest": entry["team"].get("crest", ""),
-                                "played": entry["playedGames"],
-                                "won": entry["won"],
-                                "draw": entry["draw"],
-                                "lost": entry["lost"],
-                                "goals_for": entry["goalsFor"],
-                                "goals_against": entry["goalsAgainst"],
-                                "goal_diff": entry["goalDifference"],
-                                "points": entry["points"],
-                            })
-                league_info = MAJOR_LEAGUES.get(league, {})
-                return {
-                    "league": league,
-                    "league_name": league_info.get("name", league),
-                    "league_name_ar": league_info.get("name_ar", league),
-                    "standings": standings,
-                    "source": "football-data.org",
-                    "error": False,
-                }
-        except Exception as exc:
-            logger.debug(f"football-data standings error: {exc}")
-        return None
-
-    async def _fetch_fd_matches(self, league: str, status: str) -> Optional[dict]:
-        """Fetch matches from football-data.org."""
-        if not settings.football_data_key:
-            return None
-        try:
-            params = {"status": status} if status != "ALL" else {}
-            data = await self._football_data.get(
-                f"/competitions/{league}/matches",
-                params=params,
-                headers={"X-Auth-Token": settings.football_data_key},
-            )
-            if data and "matches" in data:
-                matches = []
-                for m in data["matches"][:20]:
-                    matches.append({
-                        "home": m["homeTeam"]["name"],
-                        "away": m["awayTeam"]["name"],
-                        "score_home": m.get("score", {}).get("fullTime", {}).get("home"),
-                        "score_away": m.get("score", {}).get("fullTime", {}).get("away"),
-                        "status": m["status"],
-                        "date": m.get("utcDate", ""),
-                        "matchday": m.get("matchday"),
-                    })
-                return {"league": league, "matches": matches, "source": "football-data.org", "error": False}
-        except Exception as exc:
-            logger.debug(f"football-data matches error: {exc}")
-        return None
-
-    async def _fetch_espn_standings(self, league: str) -> Optional[dict]:
-        """Fetch standings from ESPN (free, no key)."""
-        espn_league_map = {"PL": "eng.1", "PD": "esp.1", "SA": "ita.1", "BL1": "ger.1", "FL1": "fra.1"}
-        espn_league = espn_league_map.get(league)
-        if not espn_league:
-            return None
-        try:
-            data = await self._espn.get(f"/{espn_league}/standings")
-            if data and "children" in data:
-                standings = []
-                for group in data.get("children", []):
-                    for entry in group.get("standings", {}).get("entries", []):
-                        team_info = entry.get("team", {})
-                        stats = {s["name"]: s["value"] for s in entry.get("stats", [])}
-                        standings.append({
-                            "position": int(stats.get("rank", 0)),
-                            "team": team_info.get("displayName", ""),
-                            "team_crest": team_info.get("logos", [{}])[0].get("href", "") if team_info.get("logos") else "",
-                            "played": int(stats.get("gamesPlayed", 0)),
-                            "won": int(stats.get("wins", 0)),
-                            "draw": int(stats.get("ties", 0)),
-                            "lost": int(stats.get("losses", 0)),
-                            "points": int(stats.get("points", 0)),
-                            "goal_diff": int(stats.get("pointDifferential", 0)),
-                        })
-                league_info = MAJOR_LEAGUES.get(league, {})
-                return {
-                    "league": league,
-                    "league_name": league_info.get("name", league),
-                    "standings": sorted(standings, key=lambda x: x["position"]),
-                    "source": "ESPN",
-                    "error": False,
-                }
-        except Exception as exc:
-            logger.debug(f"ESPN standings error: {exc}")
-        return None
-
-    async def _fetch_espn_scores(self, league: str) -> Optional[dict]:
-        """Fetch scores from ESPN."""
-        espn_map = {"PL": "eng.1", "PD": "esp.1", "SA": "ita.1", "BL1": "ger.1", "FL1": "fra.1"}
-        espn_league = espn_map.get(league)
-        if not espn_league:
-            return None
-        try:
-            data = await self._espn.get(f"/{espn_league}/scoreboard")
-            if data and "events" in data:
-                matches = []
-                for event in data["events"]:
-                    comps = event.get("competitions", [{}])
-                    if comps:
-                        comp = comps[0]
-                        teams = comp.get("competitors", [])
-                        if len(teams) >= 2:
-                            home = next((t for t in teams if t.get("homeAway") == "home"), teams[0])
-                            away = next((t for t in teams if t.get("homeAway") == "away"), teams[1])
-                            matches.append({
-                                "home": home.get("team", {}).get("displayName", ""),
-                                "away": away.get("team", {}).get("displayName", ""),
-                                "score_home": home.get("score"),
-                                "score_away": away.get("score"),
-                                "status": event.get("status", {}).get("type", {}).get("name", ""),
-                                "date": event.get("date", ""),
-                            })
-                return {"league": league, "matches": matches, "source": "ESPN", "error": False}
-        except Exception as exc:
-            logger.debug(f"ESPN scores error: {exc}")
-        return None
-
-    async def _fetch_espn_live(self) -> Optional[dict]:
-        """Fetch all live scores from ESPN."""
-        all_matches = []
-        for espn_league in ["eng.1", "esp.1", "ita.1", "ger.1", "fra.1"]:
+        data = await self._get("/standings", {"league": league_id, "season": CURRENT_SEASON})
+        if data and "response" in data:
             try:
-                data = await self._espn.get(f"/{espn_league}/scoreboard")
-                if data and "events" in data:
-                    for event in data["events"]:
-                        status = event.get("status", {}).get("type", {}).get("state", "")
-                        if status == "in":
-                            comps = event.get("competitions", [{}])
-                            if comps:
-                                comp = comps[0]
-                                teams = comp.get("competitors", [])
-                                if len(teams) >= 2:
-                                    home = next((t for t in teams if t.get("homeAway") == "home"), teams[0])
-                                    away = next((t for t in teams if t.get("homeAway") == "away"), teams[1])
-                                    all_matches.append({
-                                        "league": espn_league,
-                                        "home": home.get("team", {}).get("displayName", ""),
-                                        "away": away.get("team", {}).get("displayName", ""),
-                                        "score_home": home.get("score"),
-                                        "score_away": away.get("score"),
-                                        "clock": event.get("status", {}).get("displayClock", ""),
-                                        "period": event.get("status", {}).get("period", 0),
-                                    })
-            except Exception as exc:
-                logger.debug(f"ESPN live error for {espn_league}: {exc}")
+                raw = data["response"][0]["league"]["standings"][0]
+                standings = []
+                for entry in raw:
+                    team = entry.get("team", {})
+                    all_s = entry.get("all", {})
+                    goals = all_s.get("goals", {})
+                    standings.append({
+                        "position": entry.get("rank"),
+                        "team": team.get("name", ""),
+                        "played": all_s.get("played", 0),
+                        "won": all_s.get("win", 0),
+                        "draw": all_s.get("draw", 0),
+                        "lost": all_s.get("lose", 0),
+                        "goals_for": goals.get("for", 0),
+                        "goals_against": goals.get("against", 0),
+                        "goal_diff": entry.get("goalsDiff", 0),
+                        "points": entry.get("points", 0),
+                    })
+                result = {
+                    "league": league_code.upper(),
+                    "league_name": league_info["name"],
+                    "league_name_ar": league_info["name_ar"],
+                    "standings": standings,
+                    "error": False,
+                }
+                await cache.set(cache_key, result, ttl=CACHE_TTL.get("football_static", 3600))
+                return result
+            except (IndexError, KeyError) as exc:
+                logger.warning(f"standings parse: {exc}")
+        stale = await cache.get_stale(cache_key)
+        if stale and stale.get("data"):
+            return stale["data"]
+        return {"error": True}
 
-        return {"matches": all_matches, "error": False}
-
-    async def close(self) -> None:
-        await self._football_data.close()
-        await self._espn.close()
-        await self._sportsdb.close()
+    async def get_live(self) -> list | dict:
+        cache_key = "apifb:live"
+        cached = await cache.get(cache_key)
+        if cached is not None:
+            return cached
+        league_ids = "-".join(str(v["id"]) for v in MAJOR_LEAGUES.values())
+        data = await self._get("/fixtures", {"live": league_ids})
+        if data and "response" in data:
+            fixtures = []
+            for raw in data["response"]:
+                lid = raw.get("league", {}).get("id")
+                code = next((k for k, v in MAJOR_LEAGUES.items() if v["id"] == lid), "")
+                fixtures.append(_normalize_fixture(raw, code))
+            await cache.set(cache_key, fixtures, ttl=CACHE_TTL.get("football_live", 60))
+            return fixtures
+        stale = await cache.get_stale(cache_key)
+        if stale and stale.get("data"):
+            return stale["data"]
+        return {"error": True}
 
 
 omega_football = OmegaFootball()
@@ -5876,8 +5771,7 @@ from handlers.fuel import register_fuel_handlers
 from handlers.weather import register_weather_handlers
 from handlers.football import register_football_handlers
 from handlers.movies import register_movies_handlers
-from handlers.cv_generator import register_cv_handlers
-from handlers.logo_generator import register_logo_handlers
+
 from handlers.ai_chat import register_ai_handlers
 from handlers.stocks import register_stocks_handlers
 from handlers.crypto import register_crypto_handlers
@@ -5895,8 +5789,7 @@ def register_all_handlers(dp):
     register_weather_handlers(dp)
     register_football_handlers(dp)
     register_movies_handlers(dp)
-    register_cv_handlers(dp)
-    register_logo_handlers(dp)
+
     register_ai_handlers(dp)
     register_stocks_handlers(dp)
     register_crypto_handlers(dp)
@@ -6016,14 +5909,8 @@ async def _dispatch_key(message: Message, key: str, lang: str) -> None:
         elif key == "ai":
             hint = "🤖 اكتب سؤالك مباشرةً!" if lang == "ar" else "🤖 Just type your question!"
             await message.answer(hint)
-        elif key == "logo":
-            from handlers.logo_generator import cmd_logo
-            await cmd_logo(message, lang=lang)
-        elif key == "cv":
-            from handlers.cv_generator import cmd_cv
-            from aiogram.fsm.context import FSMContext
-            # Can't inject FSMContext here; instruct user to type /cv
-            hint = "📄 اكتب /cv لبدء إنشاء سيرتك الذاتية" if lang == "ar" else "📄 Type /cv to start your CV"
+        elif key in ("logo", "cv"):
+            hint = "🤖 اكتب سؤالك مباشرةً!" if lang == "ar" else "🤖 Just type your question!"
             await message.answer(hint)
         elif key == "flights":
             hint = "✈️ أرسل رمز المطار — مثال: BEY" if lang == "ar" else "✈️ Send airport code — e.g. BEY"
@@ -6463,6 +6350,9 @@ def register_weather_handlers(dp) -> None:
 
 FILES["handlers/football.py"] = r'''
 import logging
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
 from aiogram import Router
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
@@ -6473,63 +6363,122 @@ from config import t
 logger = logging.getLogger(__name__)
 router = Router(name="football")
 
+_BEIRUT = ZoneInfo("Asia/Beirut")
+
+
+def _fmt_local(date_utc: str) -> str:
+    try:
+        dt = datetime.fromisoformat(date_utc.replace("Z", "+00:00"))
+        return dt.astimezone(_BEIRUT).strftime("%H:%M")
+    except Exception:
+        return "—"
+
+
+def _score_display(f: dict) -> str:
+    if f["status"] == "NS":
+        return "🆚"
+    h = f.get("home_score")
+    a = f.get("away_score")
+    return f"‹ {h if h is not None else '?'} - {a if a is not None else '?'} ›"
+
+
+def _status_line(f: dict) -> str:
+    s = f.get("status", "NS")
+    el = f.get("status_elapsed")
+    if s == "NS":   return "🗓️ موعد"
+    if s in ("1H", "2H"): return f"🔴 مباشر '{el}"
+    if s == "HT":   return "⏸️ استراحة"
+    if s == "FT":   return "🏁 انتهت"
+    if s == "ET":   return "⚡ وقت إضافي"
+    if s == "PEN":  return "🎯 ضربات ترجيح"
+    return s
+
+
+def _card(f: dict) -> str:
+    return (
+        f"⚽ {f['league_ar']}\n\n"
+        f"{f['home']}\n"
+        f"{_score_display(f)}\n"
+        f"{f['away']}\n\n"
+        f"{_status_line(f)}\n"
+        f"🏟️ {f.get('venue') or '—'}\n"
+        f"🕙 {_fmt_local(f.get('date_utc', ''))} (بيروت)"
+    )
+
+
+def _league_kb() -> InlineKeyboardMarkup:
+    btns = [
+        InlineKeyboardButton(text=info["name_ar"], callback_data=f"fb:{code}")
+        for code, info in MAJOR_LEAGUES.items()
+    ]
+    rows = [btns[i:i+2] for i in range(0, len(btns), 2)]
+    rows.append([InlineKeyboardButton(text="🔴 نتائج مباشرة", callback_data="fb:live")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _today(fixtures: list) -> list:
+    today = datetime.now(timezone.utc).date().isoformat()
+    return [f for f in fixtures if f.get("date_utc", "").startswith(today)]
+
+
+def _nearest(fixtures: list) -> list:
+    upcoming = sorted([f for f in fixtures if f.get("status") == "NS"], key=lambda f: f.get("date_utc",""))
+    if upcoming:
+        return upcoming[:8]
+    return sorted([f for f in fixtures if f.get("status") == "FT"], key=lambda f: f.get("date_utc",""), reverse=True)[:8]
+
+
+async def _send_fixtures(target, league_code: str, lang: str) -> None:
+    send = target.answer if isinstance(target, Message) else target.message.answer
+    data = await omega_football.get_fixtures(league_code)
+    if isinstance(data, dict) and data.get("error"):
+        await send(t("error", lang))
+        return
+    selection = _today(data) or _nearest(data)
+    if not selection:
+        await send(t("fb_no_live", lang))
+        return
+    for f in selection[:8]:
+        await send(_card(f), parse_mode="Markdown")
+
+
+async def _send_live(target, lang: str) -> None:
+    send = target.answer if isinstance(target, Message) else target.message.answer
+    data = await omega_football.get_live()
+    if isinstance(data, dict) and data.get("error"):
+        await send(t("fb_no_live", lang))
+        return
+    if not data:
+        await send(t("fb_no_live", lang))
+        return
+    for f in data[:8]:
+        await send(_card(f), parse_mode="Markdown")
+
 
 @router.message(Command("football"))
 async def cmd_football(message: Message, lang: str = "en") -> None:
     args = message.text.split()[1:] if message.text else []
     if not args:
-        buttons = []
-        for code, info in list(MAJOR_LEAGUES.items())[:8]:
-            name = info.get("name_ar") if lang == "ar" else info.get("name", code)
-            buttons.append(InlineKeyboardButton(text=name, callback_data=f"fb:standings:{code}"))
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[buttons[i:i+2] for i in range(0, len(buttons), 2)])
-        keyboard.inline_keyboard.append([InlineKeyboardButton(text=t("fb_live_btn", lang), callback_data="fb:live")])
-        await message.answer(t("fb_choose_league", lang), parse_mode="Markdown", reply_markup=keyboard)
+        await message.answer(t("fb_choose_league", lang), parse_mode="Markdown", reply_markup=_league_kb())
         return
-
-    league = args[0].upper()
-    await message.answer(t("fetching", lang))
-    try:
-        data = await omega_football.get_standings(league)
-        if data.get("error"):
-            await message.answer(t("error", lang))
-            return
-        lname = data.get("league_name_ar") if lang == "ar" else data.get("league_name", league)
-        text = f"⚽ **{lname}**\n\n"
-        for entry in data.get("standings", [])[:10]:
-            text += f"{entry['position']}. {entry['team']} — {entry['points']} pts\n"
-        await message.answer(text, parse_mode="Markdown")
-    except Exception as exc:
-        logger.error(f"Football error: {exc}", exc_info=True)
-        await message.answer(t("error", lang))
+    arg = args[0].upper()
+    if arg == "LIVE":
+        await _send_live(message, lang)
+    elif arg in MAJOR_LEAGUES:
+        await _send_fixtures(message, arg, lang)
+    else:
+        await message.answer(t("not_found", lang))
 
 
-@router.callback_query(lambda c: c.data.startswith("fb:"))
-async def handle_football_cb(callback: CallbackQuery, lang: str = "en") -> None:
-    parts = callback.data.split(":")
-    action = parts[1]
+@router.callback_query(lambda c: c.data and c.data.startswith("fb:"))
+async def handle_fb_cb(callback: CallbackQuery, lang: str = "en") -> None:
     await callback.answer()
-
+    parts = callback.data.split(":")
+    action = parts[1] if len(parts) > 1 else ""
     if action == "live":
-        data = await omega_football.get_live_scores()
-        if not data.get("matches"):
-            await callback.message.answer(t("fb_no_live", lang))
-            return
-        text = t("fb_live_title", lang) + "\n\n"
-        for m in data["matches"][:10]:
-            text += f"  {m['home']} {m.get('score_home', '?')} - {m.get('score_away', '?')} {m['away']} ({m.get('clock', '')})\n"
-        await callback.message.answer(text, parse_mode="Markdown")
-
-    elif action == "standings" and len(parts) >= 3:
-        league = parts[2]
-        data = await omega_football.get_standings(league)
-        if data.get("error"):
-            await callback.message.answer(t("error", lang))
-            return
-        text = f"⚽ **{data.get('league_name_ar', league)}**\n\n"
-        for entry in data.get("standings", [])[:10]:
-            text += f"{entry['position']}. {entry['team']} — {entry['points']} pts\n"
-        await callback.message.answer(text, parse_mode="Markdown")
+        await _send_live(callback, lang)
+    elif action.upper() in MAJOR_LEAGUES:
+        await _send_fixtures(callback, action.upper(), lang)
 
 
 def register_football_handlers(dp) -> None:
@@ -6538,6 +6487,8 @@ def register_football_handlers(dp) -> None:
 
 FILES["handlers/movies.py"] = r'''
 import logging
+import re
+
 from aiogram import Router
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
@@ -6548,305 +6499,150 @@ from config import t
 logger = logging.getLogger(__name__)
 router = Router(name="movies")
 
+_YEAR_RE = re.compile(r"\b(19[0-9]{2}|20[0-9]{2})\b")
+
+
+def _extract_year(text: str) -> tuple:
+    m = _YEAR_RE.search(text)
+    if m:
+        return _YEAR_RE.sub("", text).strip(), int(m.group(1))
+    return text, None
+
+
+def _item_year(item: dict) -> int | None:
+    rd = item.get("release_date", "")
+    try:
+        return int(rd[:4]) if rd else None
+    except ValueError:
+        return None
+
+
+def _caption(item: dict) -> str:
+    title = item.get("title", "")
+    rd = item.get("release_date", "")
+    year = rd[:4] if rd else "?"
+    vote = item.get("vote_average", 0)
+    genres = item.get("genres", [])
+    genres_str = ", ".join(genres) if isinstance(genres, list) and genres else "—"
+    overview = item.get("overview", "")
+    preview = overview[:180] + ("..." if len(overview) > 180 else "")
+    return (
+        f"🎬 *{title}* ({year})\n"
+        f"⭐ {vote}/10  |  🎭 {genres_str}\n"
+        f"📅 {rd}\n"
+        f"📝 {preview}"
+    )
+
+
+async def _send_card(msg: Message, item: dict, lang: str) -> None:
+    poster = item.get("poster", "")
+    cap = _caption(item)
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(
+            text=t("btn_details", lang),
+            callback_data=f"mv:detail:{item['id']}:{item.get('media_type','movie')}",
+        )
+    ]])
+    try:
+        if poster:
+            await msg.answer_photo(photo=poster, caption=cap, parse_mode="Markdown", reply_markup=kb)
+            return
+    except Exception:
+        pass
+    await msg.answer(cap, parse_mode="Markdown", reply_markup=kb)
+
 
 @router.message(Command("movie"))
 async def cmd_movie(message: Message, lang: str = "en") -> None:
-    query = message.text.replace("/movie", "").strip() if message.text else ""
-    if not query:
-        data = await omega_movies.get_trending()
-        if data.get("error"):
-            await message.answer(t("error", lang))
-            return
-        text = t("trending_title", lang) + "\n\n"
-        for i, item in enumerate(data["results"][:10], 1):
-            stars = "⭐" * min(int(item.get("vote_average", 0) / 2), 5)
-            text += f"{i}. **{item['title']}** {stars}\n"
-            text += f"   📅 {item.get('release_date', 'N/A')} | 🎭 {item.get('media_type', '')}\n\n"
-        text += t("search_hint", lang)
-        await message.answer(text, parse_mode="Markdown")
-        return
+    raw = message.text.replace("/movie", "", 1).strip() if message.text else ""
 
-    await message.answer(t("fetching", lang))
-    try:
-        data = await omega_movies.search(query)
+    if not raw:
+        data = await omega_movies.get_trending()
         if data.get("error") or not data.get("results"):
             await message.answer(t("error", lang))
             return
+        for item in data["results"][:5]:
+            await _send_card(message, item, lang)
+        return
 
-        for item in data["results"][:3]:
-            text = f"🎬 **{item['title']}**\n"
-            text += f"{t('label_rating', lang)}: {item.get('vote_average', 'N/A')}/10\n"
-            text += f"📅 {item.get('release_date', 'N/A')}\n"
-            text += f"📝 {item.get('overview', '')[:200]}\n"
+    query, requested_year = _extract_year(raw)
+    if not query:
+        query = raw
 
-            buttons = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text=t("btn_details", lang), callback_data=f"mv:detail:{item['id']}:{item.get('media_type', 'movie')}"),
-                 InlineKeyboardButton(text=t("btn_favorite", lang), callback_data=f"mv:watch:{item['id']}:{item.get('media_type', 'movie')}")],
-            ])
-            await message.answer(text, parse_mode="Markdown", reply_markup=buttons)
+    try:
+        data = await omega_movies.search(query)
+        if data.get("error") or not data.get("results"):
+            await message.answer(t("not_found", lang))
+            return
+
+        results = data["results"]
+        if requested_year is not None:
+            filtered = [r for r in results if _item_year(r) == requested_year]
+            if not filtered:
+                await message.answer(
+                    f"❌ لا توجد أفلام موثّقة في {requested_year}\n"
+                    f"No verified {requested_year} movies found."
+                )
+                return
+            results = filtered
+
+        for item in results[:3]:
+            await _send_card(message, item, lang)
+
     except Exception as exc:
         logger.error(f"Movie error: {exc}", exc_info=True)
         await message.answer(t("error", lang))
 
 
-@router.callback_query(lambda c: c.data.startswith("mv:"))
-async def handle_movie_cb(callback: CallbackQuery, lang: str = "en") -> None:
+@router.callback_query(lambda c: c.data and c.data.startswith("mv:"))
+async def handle_mv_cb(callback: CallbackQuery, lang: str = "en") -> None:
     parts = callback.data.split(":")
-    action = parts[1]
     await callback.answer()
+    if parts[1] != "detail" or len(parts) < 4:
+        return
+    try:
+        tmdb_id, media_type = int(parts[2]), parts[3]
+    except (ValueError, IndexError):
+        return
 
-    if action == "detail" and len(parts) >= 4:
-        tmdb_id = int(parts[2])
-        media_type = parts[3]
-        data = await omega_movies.get_details(tmdb_id, media_type)
-        if data.get("error"):
-            await callback.message.answer(t("error", lang))
-            return
-        text = f"🎬 **{data['title']}**\n"
-        if data.get("tagline"):
-            text += f"_\"{data['tagline']}\"_\n"
-        text += f"\n⭐ TMDB: {data.get('vote_average', 'N/A')}/10"
-        if data.get("imdb_rating") and data["imdb_rating"] != "N/A":
-            text += f" | IMDb: {data['imdb_rating']}"
-        if data.get("rotten_tomatoes") and data["rotten_tomatoes"] != "N/A":
-            text += f" | 🍅 {data['rotten_tomatoes']}"
-        text += f"\n📅 {data.get('release_date', 'N/A')}"
-        if data.get("runtime"):
-            text += f" | ⏱ {data['runtime']} min"
-        text += f"\n🎭 {', '.join(data.get('genres', []))}\n"
-        if data.get("director"):
-            text += f"{t('label_director', lang)}: {data['director']}\n"
-        if data.get("cast"):
-            cast_names = [c['name'] for c in data['cast'][:5]]
-            text += f"{t('label_cast', lang)}: {', '.join(cast_names)}\n"
-        text += f"\n📝 {data.get('overview', '')[:300]}"
-        if data.get("trailer_url"):
-            text += f"\n\n🎥 [Trailer]({data['trailer_url']})"
-        await callback.message.answer(text, parse_mode="Markdown")
+    data = await omega_movies.get_details(tmdb_id, media_type)
+    if data.get("error"):
+        await callback.message.answer(t("error", lang))
+        return
+
+    title = data.get("title", "")
+    rd = data.get("release_date", "")
+    year = rd[:4] if rd else "?"
+    vote = data.get("vote_average", 0)
+    genres = ", ".join(data.get("genres", []))
+    overview = data.get("overview", "")[:180]
+
+    text = (
+        f"🎬 *{title}* ({year})\n"
+        f"⭐ {vote}/10  |  🎭 {genres}\n"
+        f"📅 {rd}"
+    )
+    if data.get("runtime"):
+        text += f"  |  ⏱ {data['runtime']} min"
+    if data.get("tagline"):
+        text += f"\n\n_{data['tagline']}_"
+    if data.get("director"):
+        text += f"\n\n🎬 {t('label_director', lang)}: {data['director']}"
+    if data.get("cast"):
+        names = ", ".join(c["name"] for c in data["cast"][:5])
+        text += f"\n🌟 {t('label_cast', lang)}: {names}"
+    text += f"\n\n📝 {overview}"
+    if data.get("trailer_url"):
+        text += f"\n\n🎥 [Trailer]({data['trailer_url']})"
+
+    await callback.message.answer(text, parse_mode="Markdown")
 
 
 def register_movies_handlers(dp) -> None:
     dp.include_router(router)
 '''
 
-FILES["handlers/cv_generator.py"] = r'''
-import logging
-from aiogram import Router
-from aiogram.types import Message
-from aiogram.filters import Command
 
-from config import t
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
-
-logger = logging.getLogger(__name__)
-router = Router(name="cv")
-
-
-class CVStates(StatesGroup):
-    full_name = State()
-    email = State()
-    phone = State()
-    summary = State()
-    experience = State()
-    education = State()
-    skills = State()
-    languages = State()
-    template = State()
-
-
-@router.message(Command("cv"))
-async def cmd_cv(message: Message, state: FSMContext, lang: str = "en") -> None:
-    await state.update_data(lang=lang)
-    await state.set_state(CVStates.full_name)
-    await message.answer(
-        t("cv_intro", lang) + "\n\n" + t("cv_step", lang, n="1", q=t("cv_q_name", lang)),
-        parse_mode="Markdown"
-    )
-
-
-@router.message(CVStates.full_name)
-async def process_name(message: Message, state: FSMContext, lang: str = "en") -> None:
-    state_data = await state.get_data()
-    lang = state_data.get("lang", lang)
-    await state.update_data(full_name=message.text)
-    await state.set_state(CVStates.email)
-    await message.answer(t("cv_step", lang, n="2", q=t("cv_q_email", lang)), parse_mode="Markdown")
-
-
-@router.message(CVStates.email)
-async def process_email(message: Message, state: FSMContext, lang: str = "en") -> None:
-    state_data = await state.get_data()
-    lang = state_data.get("lang", lang)
-    await state.update_data(email=message.text)
-    await state.set_state(CVStates.phone)
-    await message.answer(t("cv_step", lang, n="3", q=t("cv_q_phone", lang)), parse_mode="Markdown")
-
-
-@router.message(CVStates.phone)
-async def process_phone(message: Message, state: FSMContext, lang: str = "en") -> None:
-    state_data = await state.get_data()
-    lang = state_data.get("lang", lang)
-    await state.update_data(phone=message.text)
-    await state.set_state(CVStates.summary)
-    await message.answer(t("cv_step", lang, n="4", q=t("cv_q_summary", lang)), parse_mode="Markdown")
-
-
-@router.message(CVStates.summary)
-async def process_summary(message: Message, state: FSMContext, lang: str = "en") -> None:
-    state_data = await state.get_data()
-    lang = state_data.get("lang", lang)
-    await state.update_data(summary=message.text)
-    await state.set_state(CVStates.experience)
-    await message.answer(t("cv_step", lang, n="5", q=t("cv_q_experience", lang)), parse_mode="Markdown")
-
-
-@router.message(CVStates.experience)
-async def process_experience(message: Message, state: FSMContext, lang: str = "en") -> None:
-    state_data = await state.get_data()
-    lang = state_data.get("lang", lang)
-    await state.update_data(experience=message.text)
-    await state.set_state(CVStates.education)
-    await message.answer(t("cv_step", lang, n="6", q=t("cv_q_education", lang)), parse_mode="Markdown")
-
-
-@router.message(CVStates.education)
-async def process_education(message: Message, state: FSMContext, lang: str = "en") -> None:
-    state_data = await state.get_data()
-    lang = state_data.get("lang", lang)
-    await state.update_data(education=message.text)
-    await state.set_state(CVStates.skills)
-    await message.answer(t("cv_step", lang, n="7", q=t("cv_q_skills", lang)), parse_mode="Markdown")
-
-
-@router.message(CVStates.skills)
-async def process_skills(message: Message, state: FSMContext, lang: str = "en") -> None:
-    state_data = await state.get_data()
-    lang = state_data.get("lang", lang)
-    await state.update_data(skills=message.text)
-    await state.set_state(CVStates.languages)
-    await message.answer(t("cv_step", lang, n="8", q=t("cv_q_languages", lang)), parse_mode="Markdown")
-
-
-@router.message(CVStates.languages)
-async def process_languages(message: Message, state: FSMContext, lang: str = "en") -> None:
-    state_data = await state.get_data()
-    lang = state_data.get("lang", lang)
-    await state.update_data(languages=message.text)
-    await state.set_state(CVStates.template)
-    await message.answer(
-        t("cv_step", lang, n="9", q=t("cv_q_template", lang)) + "\n1. Modern\n2. Classic\n3. Creative\n4. Minimal\n5. Professional",
-        parse_mode="Markdown"
-    )
-
-
-@router.message(CVStates.template)
-async def process_template(message: Message, state: FSMContext, lang: str = "en") -> None:
-    state_data = await state.get_data()
-    lang = state_data.get("lang", lang)
-    templates = {"1": "modern", "2": "classic", "3": "creative", "4": "minimal", "5": "professional"}
-    template = templates.get(message.text.strip(), "modern")
-    state_data["template"] = template
-    data = state_data
-    await state.clear()
-
-    await message.answer(t("cv_generating", lang))
-
-    try:
-        from services.omega_query_engine import query_engine
-
-        prompt = f"""Improve this CV professionally:
-Name: {data.get('full_name', '')}
-Summary: {data.get('summary', '')}
-Experience: {data.get('experience', '')}
-Education: {data.get('education', '')}
-Skills: {data.get('skills', '')}
-Languages: {data.get('languages', '')}
-
-Return improved bullet points for each section. Be concise and professional."""
-
-        lang_instruction = f"Respond in the same language as the CV data." 
-        responses = await query_engine.query_all(prompt, system_prompt=f"You are a professional CV writer. {lang_instruction}")
-        improved_text = responses[0]["text"] if responses else data.get("summary", "")
-
-        await message.answer(
-            t("cv_done", lang) + f"\n\n"
-            f"📄 {template}\n"
-            f"👤 {data.get('full_name', '')}\n\n"
-            f"{improved_text[:500]}",
-            parse_mode="Markdown"
-        )
-
-    except Exception as exc:
-        logger.error(f"CV generation error: {exc}", exc_info=True)
-        await message.answer(t("error", lang))
-
-
-def register_cv_handlers(dp) -> None:
-    dp.include_router(router)
-'''
-
-FILES["handlers/logo_generator.py"] = r'''
-import logging
-import asyncio
-import urllib.parse
-from aiogram import Router
-from aiogram.types import Message
-from aiogram.filters import Command
-
-from config import t
-
-logger = logging.getLogger(__name__)
-router = Router(name="logo")
-
-
-@router.message(Command("logo"))
-async def cmd_logo(message: Message, lang: str = "en") -> None:
-    query = message.text.replace("/logo", "").strip() if message.text else ""
-    if not query:
-        await message.answer(
-            t("logo_intro", lang),
-            parse_mode="Markdown"
-        )
-        return
-
-    await message.answer(t("logo_generating", lang))
-    try:
-        # Use Pollinations.ai for real AI image generation (free, no auth needed)
-        styles = [
-            f"professional minimalist logo for {query}, flat design, vector style, white background",
-            f"modern creative logo {query}, gradient colors, clean typography, transparent background",
-            f"corporate logo design {query}, geometric shapes, blue and gold, professional",
-        ]
-
-        sent = False
-        for style_prompt in styles:
-            try:
-                encoded = urllib.parse.quote(style_prompt)
-                img_url = f"https://image.pollinations.ai/prompt/{encoded}?width=512&height=512&nologo=true"
-                caption = f"🎨 **{query}**\n\n_AI-generated logo concept_"
-                await message.answer_photo(img_url, caption=caption, parse_mode="Markdown")
-                sent = True
-                break
-            except Exception:
-                continue
-
-        if not sent:
-            # Fallback: send link
-            encoded = urllib.parse.quote(f"professional logo {query} white background flat design")
-            img_url = f"https://image.pollinations.ai/prompt/{encoded}?width=512&height=512"
-            await message.answer(
-                f"🎨 **{query}**\n\n[View AI logo]({img_url})",
-                parse_mode="Markdown"
-            )
-    except Exception as exc:
-        logger.error(f"Logo error: {exc}", exc_info=True)
-        await message.answer(t("error", lang))
-
-
-def register_logo_handlers(dp) -> None:
-    dp.include_router(router)
-'''
 
 FILES["handlers/ai_chat.py"] = r'''
 import logging
@@ -7146,31 +6942,6 @@ async def _route_to_service(message: Message, query: str, lang: str) -> bool:
             await message.answer(t("error", lang))
             return True
 
-    # Logo generation
-    _LOGO_KW = {"لوغو", "logo", "شعار", "صمم لوغو", "اعمل لوغو", "make logo", "design logo"}
-    if _has_kw(query, _LOGO_KW):
-        try:
-            brand = query
-            for kw in ("لوغو", "شعار", "logo", "صمم", "اعمل", "make", "design", "لشركة", "لـ", "for", "a logo", "الشركة"):
-                brand = re.sub(re.escape(kw), " ", brand, flags=re.IGNORECASE)
-            brand = " ".join(brand.split()).strip("؟?!.,:\"'") or query
-            await message.answer(t("logo_generating", lang))
-            style_prompt = f"professional minimalist logo for {brand}, flat design, vector style, white background"
-            encoded = urllib.parse.quote(style_prompt)
-            img_url = f"https://image.pollinations.ai/prompt/{encoded}?width=512&height=512&nologo=true"
-            caption = f"🎨 **{brand}**\n\n_AI-generated logo concept_"
-            await message.answer_photo(img_url, caption=caption, parse_mode="Markdown")
-            return True
-        except Exception as exc:
-            logger.debug(f"Logo routing error: {exc}")
-            try:
-                encoded = urllib.parse.quote(f"professional logo {query} white background")
-                img_url = f"https://image.pollinations.ai/prompt/{encoded}?width=512&height=512"
-                await message.answer(f"🎨 **{query}**\n\n[View logo]({img_url})", parse_mode="Markdown")
-            except Exception:
-                await message.answer(t("error", lang))
-            return True
-
     return False
 
 
@@ -7328,6 +7099,8 @@ def register_crypto_handlers(dp) -> None:
 
 FILES["handlers/news.py"] = r'''
 import logging
+from datetime import datetime, timezone
+
 from aiogram import Router
 from aiogram.types import Message
 from aiogram.filters import Command
@@ -7339,32 +7112,78 @@ logger = logging.getLogger(__name__)
 router = Router(name="news")
 
 
+def _time_ago(ts: str) -> str:
+    if not ts:
+        return ""
+    fmts = [
+        "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S%z",
+        "%a, %d %b %Y %H:%M:%S %z", "%a, %d %b %Y %H:%M:%S GMT",
+    ]
+    dt = None
+    for fmt in fmts:
+        try:
+            dt = datetime.strptime(ts, fmt)
+            break
+        except ValueError:
+            continue
+    if dt is None:
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    delta = datetime.now(timezone.utc) - dt
+    mins = int(delta.total_seconds() / 60)
+    if mins < 60:
+        return f"{mins}m"
+    hours = mins // 60
+    if hours < 24:
+        return f"{hours}h"
+    return f"{hours // 24}d"
+
+
+def _card(article: dict, lang: str) -> str:
+    rtl = "\u200f" if lang == "ar" else ""
+    title = article.get("title", "").strip()
+    desc = (article.get("description", "") or "").strip()
+    source = (article.get("source", "") or "").strip() or "—"
+    url = article.get("url", "")
+    ago = _time_ago(article.get("published_at", ""))
+    desc_short = desc[:200] + ("..." if len(desc) > 200 else "")
+    read_lbl = "📖 اقرأ المزيد" if lang == "ar" else "📖 Read more"
+    parts = [f"{rtl}📰 *{title}*", ""]
+    if desc_short:
+        parts.append(f"{rtl}{desc_short}")
+        parts.append("")
+    meta = f"{rtl}📍 {source}"
+    if ago:
+        meta += f"  |  🕐 {ago}"
+    parts.append(meta)
+    if url:
+        parts.append(f"{rtl}[{read_lbl}]({url})")
+    return "\n".join(parts)
+
+
 @router.message(Command("news"))
 async def cmd_news(message: Message, lang: str = "en") -> None:
-    query = message.text.replace("/news", "").strip() if message.text else ""
-
-    await message.answer(t("fetching", lang))
+    query = message.text.replace("/news", "", 1).strip() if message.text else ""
     try:
         if query:
-            data = await omega_news.search_news(query)
+            data = await omega_news.search_news(query, lang=lang)
         else:
-            data = await omega_news.get_headlines()
+            data = await omega_news.get_headlines(lang=lang)
 
         if data.get("error") or not data.get("articles"):
-            await message.answer(t("error", lang))
+            await message.answer(t("not_found", lang))
             return
 
-        text = t("news_headline", lang) + "\n\n"
-        for i, article in enumerate(data["articles"][:8], 1):
-            text += f"{i}. **{article['title'][:80]}**\n"
-            if article.get("source"):
-                text += f"   📍 {article['source']}\n"
-            if article.get("url"):
-                read_label = t("read_more", lang)
-                text += f"   🔗 [{read_label}]({article['url']})\n"
-            text += "\n"
+        for article in data["articles"][:5]:
+            card = _card(article, lang)
+            if not card.strip():
+                continue
+            try:
+                await message.answer(card, parse_mode="Markdown", disable_web_page_preview=False)
+            except Exception as exc:
+                logger.warning(f"News card send error: {exc}")
 
-        await message.answer(text, parse_mode="Markdown", disable_web_page_preview=True)
     except Exception as exc:
         logger.error(f"News error: {exc}", exc_info=True)
         await message.answer(t("error", lang))
