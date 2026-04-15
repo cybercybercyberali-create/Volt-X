@@ -3318,40 +3318,57 @@ def crypto_card(data: dict, lang: str) -> str:
 def stock_card(data: dict, lang: str) -> str:
     """Format stock quote data into a visual card."""
     sep = _sep()
-    name = data.get("name", "")
-    symbol = data.get("symbol", "")
-    price = data.get("price", 0) or 0
-    change = data.get("change", 0) or 0
-    change_pct = data.get("change_percent", 0) or 0
-    volume = data.get("volume", 0) or 0
-    mcap = data.get("market_cap", 0) or 0
-    pe = data.get("pe_ratio", None)
-    emoji = "📈" if change >= 0 else "📉"
+    name        = data.get("name", "") or data.get("symbol", "")
+    symbol      = data.get("symbol", "")
+    price       = data.get("price", 0) or 0
+    change      = data.get("change", 0) or 0
+    change_pct  = data.get("change_percent", 0) or 0
+    try:
+        change_pct = float(str(change_pct).replace("%",""))
+    except Exception:
+        change_pct = 0.0
+    volume      = data.get("volume", 0) or 0
+    mcap        = data.get("market_cap", 0) or 0
+    pe          = data.get("pe_ratio", None)
+    exchange    = data.get("exchange", "") or ""
+    updated     = data.get("last_updated", "") or ""
+    stale       = data.get("stale", False)
+    emoji       = "📈" if change >= 0 else "📉"
 
     if lang == "ar":
         lines = [
-            f"📊 *{name} ({symbol})*",
+            f"📊 *{name}*",
+            f"🏷️ `{symbol}`" + (f"  |  🏦 {exchange}" if exchange else ""),
             sep,
             f"💰 السعر: *${price:,.2f}*",
-            f"{emoji} التغيير: *{change:+,.2f} ({change_pct:+.2f}%)*",
-            f"📦 الحجم: *{volume:,}*",
+            f"{emoji} التغيير: *{change:+,.2f}  ({change_pct:+.2f}%)*",
         ]
+        if volume:
+            lines.append(f"📦 الحجم: {volume:,}")
         if mcap:
-            lines.append(f"💎 القيمة السوقية: *${mcap:,.0f}*")
+            lines.append(f"💎 القيمة السوقية: ${mcap:,.0f}")
         if pe:
-            lines.append(f"📐 P/E: *{pe:.2f}*")
+            lines.append(f"📐 P/E: {pe:.2f}")
+        lines.append(sep)
+        note = "⚠️ آخر سعر معروف" if stale else "🟢 بيانات حية"
+        lines.append(f"🕐 {updated}  {note}" if updated else note)
     else:
         lines = [
-            f"📊 *{name} ({symbol})*",
+            f"📊 *{name}*",
+            f"🏷️ `{symbol}`" + (f"  |  🏦 {exchange}" if exchange else ""),
             sep,
             f"💰 Price: *${price:,.2f}*",
-            f"{emoji} Change: *{change:+,.2f} ({change_pct:+.2f}%)*",
-            f"📦 Volume: *{volume:,}*",
+            f"{emoji} Change: *{change:+,.2f}  ({change_pct:+.2f}%)*",
         ]
+        if volume:
+            lines.append(f"📦 Volume: {volume:,}")
         if mcap:
-            lines.append(f"💎 Market Cap: *${mcap:,.0f}*")
+            lines.append(f"💎 Market Cap: ${mcap:,.0f}")
         if pe:
-            lines.append(f"📐 P/E: *{pe:.2f}*")
+            lines.append(f"📐 P/E: {pe:.2f}")
+        lines.append(sep)
+        note = "⚠️ Last known price" if stale else "🟢 Live"
+        lines.append(f"🕐 {updated}  {note}" if updated else note)
 
     return "\n".join(lines)
 
@@ -5078,7 +5095,9 @@ omega_movies = OmegaMovies()
 '''
 
 FILES["api_clients/omega_stocks.py"] = r'''
+import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from api_clients.base_client import BaseAPIClient
@@ -5088,16 +5107,84 @@ from services.rate_limiter import quota
 
 logger = logging.getLogger(__name__)
 
+# Common company name → ticker (Arabic + English)
+_NAME_MAP: dict[str, str] = {
+    "apple": "AAPL", "ابل": "AAPL", "آبل": "AAPL",
+    "microsoft": "MSFT", "مايكروسوفت": "MSFT", "ميكروسوفت": "MSFT",
+    "google": "GOOGL", "alphabet": "GOOGL", "جوجل": "GOOGL",
+    "amazon": "AMZN", "امازون": "AMZN", "أمازون": "AMZN",
+    "tesla": "TSLA", "تسلا": "TSLA",
+    "meta": "META", "facebook": "META", "ميتا": "META", "فيسبوك": "META",
+    "nvidia": "NVDA", "انفيديا": "NVDA", "نفيديا": "NVDA",
+    "samsung": "005930.KS", "سامسونج": "005930.KS",
+    "saudi aramco": "2222.SR", "أرامكو": "2222.SR", "ارامكو": "2222.SR",
+    "stc": "7010.SR", "اتصالات السعودية": "7010.SR",
+    "sabic": "2010.SR", "سابك": "2010.SR",
+    "netflix": "NFLX", "نتفليكس": "NFLX",
+    "disney": "DIS", "ديزني": "DIS",
+    "snapchat": "SNAP", "snap": "SNAP", "سناب": "SNAP",
+    "twitter": "X", "تويتر": "X",
+    "uber": "UBER", "اوبر": "UBER",
+    "paypal": "PYPL", "بيبال": "PYPL",
+    "intel": "INTC", "انتل": "INTC",
+    "amd": "AMD",
+    "qualcomm": "QCOM", "كوالكوم": "QCOM",
+    "alibaba": "BABA", "علي بابا": "BABA",
+    "berkshire": "BRK-B",
+    "johnson": "JNJ", "jpmorgan": "JPM", "goldman": "GS",
+}
+
+
+def _resolve_name(query: str) -> Optional[str]:
+    """Try to resolve company name to ticker symbol."""
+    q = query.strip().lower()
+    # Direct map lookup
+    if q in _NAME_MAP:
+        return _NAME_MAP[q]
+    # Partial match
+    for name, ticker in _NAME_MAP.items():
+        if name in q or q in name:
+            return ticker
+    return None
+
 
 class OmegaStocks:
-    """Stock market data using yfinance + Alpha Vantage."""
 
     def __init__(self):
         self._alpha = BaseAPIClient("alpha_vantage", "https://www.alphavantage.co")
 
-    async def get_quote(self, symbol: str) -> dict[str, Any]:
-        """Get stock quote."""
-        cache_key = f"stock:{symbol.upper()}"
+    async def resolve_symbol(self, query: str) -> str:
+        """Turn company name / Arabic name into a ticker symbol."""
+        q = query.strip()
+        # Already looks like a ticker (short, uppercase-able, no spaces)
+        if len(q) <= 6 and q.replace(".", "").replace("-", "").isalnum():
+            return q.upper()
+        # Static map
+        mapped = _resolve_name(q)
+        if mapped:
+            return mapped
+        # yfinance Search fallback
+        try:
+            import yfinance as yf
+            def _search():
+                results = yf.Search(q, max_results=5).quotes
+                for r in results:
+                    sym = r.get("symbol", "")
+                    qt  = r.get("quoteType", "")
+                    if sym and qt in ("EQUITY", "ETF"):
+                        return sym
+                return None
+            loop = asyncio.get_event_loop()
+            sym = await asyncio.wait_for(loop.run_in_executor(None, _search), timeout=10.0)
+            if sym:
+                return sym
+        except Exception as exc:
+            logger.debug(f"yfinance search error: {exc}")
+        return q.upper()
+
+    async def get_quote(self, query: str) -> dict[str, Any]:
+        symbol = await self.resolve_symbol(query)
+        cache_key = f"stock:{symbol}"
         cached = await cache.get(cache_key)
         if cached:
             return cached
@@ -5110,58 +5197,61 @@ class OmegaStocks:
 
         if result and not result.get("error"):
             await cache.set(cache_key, result, ttl=CACHE_TTL["stocks"])
+            return result
 
-        if not result or result.get("error"):
-            stale = await cache.get_stale(cache_key)
-            if stale and stale.get("data"):
-                result = stale["data"]
-                result["stale"] = True
-                return result
-        return result or {"error": True, "symbol": symbol, "message": "Quote unavailable"}
+        stale = await cache.get_stale(cache_key)
+        if stale and stale.get("data"):
+            r = stale["data"]
+            r["stale"] = True
+            return r
+
+        return {"error": True, "symbol": symbol, "message": "البيانات غير متوفرة حالياً من المصادر الحية"}
 
     async def _fetch_yfinance(self, symbol: str) -> Optional[dict]:
-        """Fetch stock data using yfinance fast_info (reliable, no key needed)."""
         try:
             import yfinance as yf
-            import asyncio
 
-            def _sync_fetch():
-                ticker = yf.Ticker(symbol)
-                fi = ticker.fast_info
+            def _sync():
+                t = yf.Ticker(symbol)
+                fi = t.fast_info
                 price = fi.last_price
-                # fallback to recent history if fast_info fails
                 if not price or price <= 0:
-                    hist = ticker.history(period="2d")
-                    if not hist.empty:
-                        price = float(hist["Close"].iloc[-1])
-                    else:
+                    hist = t.history(period="2d")
+                    if hist.empty:
                         return None
-                prev = getattr(fi, "previous_close", None) or price
-                change = price - prev
-                change_pct = (change / prev * 100) if prev else 0
-                mcap = getattr(fi, "market_cap", 0) or 0
+                    price = float(hist["Close"].iloc[-1])
+                prev  = getattr(fi, "previous_close", None) or price
+                chg   = price - prev
+                chg_p = (chg / prev * 100) if prev else 0
+                mcap  = getattr(fi, "market_cap", 0) or 0
+                exch  = getattr(fi, "exchange", "") or ""
+                info  = {}
+                try:
+                    info = t.info or {}
+                except Exception:
+                    pass
+                name = info.get("shortName") or info.get("longName") or symbol.upper()
+                now  = datetime.now(timezone.utc).strftime("%H:%M UTC")
                 return {
-                    "symbol": symbol.upper(),
-                    "name": symbol.upper(),
-                    "price": float(price),
-                    "change": float(change),
-                    "change_percent": float(change_pct),
-                    "market_cap": float(mcap),
-                    "source": "yfinance",
-                    "error": False,
+                    "symbol":         symbol.upper(),
+                    "name":           name,
+                    "price":          float(price),
+                    "change":         float(chg),
+                    "change_percent": float(chg_p),
+                    "market_cap":     float(mcap),
+                    "exchange":       exch,
+                    "last_updated":   now,
+                    "source":         "yfinance",
+                    "error":          False,
                 }
 
             loop = asyncio.get_event_loop()
-            result = await asyncio.wait_for(
-                loop.run_in_executor(None, _sync_fetch), timeout=25.0
-            )
-            return result
+            return await asyncio.wait_for(loop.run_in_executor(None, _sync), timeout=25.0)
         except Exception as exc:
-            logger.debug(f"yfinance error for {symbol}: {exc}")
+            logger.debug(f"yfinance {symbol}: {exc}")
         return None
 
     async def _fetch_alpha_vantage(self, symbol: str) -> Optional[dict]:
-        """Fetch from Alpha Vantage."""
         from config import settings
         if not settings.alpha_vantage_key:
             return None
@@ -5172,17 +5262,20 @@ class OmegaStocks:
             )
             if data and "Global Quote" in data:
                 q = data["Global Quote"]
+                now = datetime.now(timezone.utc).strftime("%H:%M UTC")
                 return {
-                    "symbol": q.get("01. symbol", symbol),
-                    "price": float(q.get("05. price", 0)),
-                    "change": float(q.get("09. change", 0)),
-                    "change_percent": q.get("10. change percent", "0%"),
-                    "volume": int(q.get("06. volume", 0)),
-                    "source": "Alpha Vantage",
-                    "error": False,
+                    "symbol":         q.get("01. symbol", symbol),
+                    "name":           q.get("01. symbol", symbol),
+                    "price":          float(q.get("05. price", 0)),
+                    "change":         float(q.get("09. change", 0)),
+                    "change_percent": float(q.get("10. change percent", "0").replace("%", "")),
+                    "volume":         int(q.get("06. volume", 0)),
+                    "last_updated":   now,
+                    "source":         "Alpha Vantage",
+                    "error":          False,
                 }
         except Exception as exc:
-            logger.debug(f"Alpha Vantage error: {exc}")
+            logger.debug(f"AlphaVantage {symbol}: {exc}")
         return None
 
     async def close(self) -> None:
@@ -7043,16 +7136,19 @@ router = Router(name="stocks")
 
 @router.message(Command("stock"))
 async def cmd_stock(message: Message, lang: str = "en") -> None:
-    symbol = message.text.replace("/stock", "").strip().upper() if message.text else ""
-    if not symbol:
-        await message.answer(t("stock_send_symbol", lang))
+    query = message.text.replace("/stock", "", 1).strip() if message.text else ""
+    if not query:
+        hint = "📈 أرسل اسم الشركة أو رمز السهم\nمثال: /stock ابل  أو  /stock AAPL" if lang == "ar" \
+            else "📈 Send a company name or ticker\nExample: /stock Apple  or  /stock AAPL"
+        await message.answer(hint)
         return
 
-    await message.answer(t("fetching", lang))
     try:
-        data = await omega_stocks.get_quote(symbol)
+        data = await omega_stocks.get_quote(query)
         if data.get("error"):
-            await message.answer(t("not_found", lang))
+            msg = f"❌ البيانات غير متوفرة حالياً من المصادر الحية\nالرمز: `{query}`" if lang == "ar" \
+                else f"❌ No live data available for `{query}`"
+            await message.answer(msg, parse_mode="Markdown")
             return
         await message.answer(stock_card(data, lang), parse_mode="Markdown")
     except Exception as exc:

@@ -255,40 +255,57 @@ def crypto_card(data: dict, lang: str) -> str:
 def stock_card(data: dict, lang: str) -> str:
     """Format stock quote data into a visual card."""
     sep = _sep()
-    name = data.get("name", "")
-    symbol = data.get("symbol", "")
-    price = data.get("price", 0) or 0
-    change = data.get("change", 0) or 0
-    change_pct = data.get("change_percent", 0) or 0
-    volume = data.get("volume", 0) or 0
-    mcap = data.get("market_cap", 0) or 0
-    pe = data.get("pe_ratio", None)
-    emoji = "📈" if change >= 0 else "📉"
+    name        = data.get("name", "") or data.get("symbol", "")
+    symbol      = data.get("symbol", "")
+    price       = data.get("price", 0) or 0
+    change      = data.get("change", 0) or 0
+    change_pct  = data.get("change_percent", 0) or 0
+    try:
+        change_pct = float(str(change_pct).replace("%",""))
+    except Exception:
+        change_pct = 0.0
+    volume      = data.get("volume", 0) or 0
+    mcap        = data.get("market_cap", 0) or 0
+    pe          = data.get("pe_ratio", None)
+    exchange    = data.get("exchange", "") or ""
+    updated     = data.get("last_updated", "") or ""
+    stale       = data.get("stale", False)
+    emoji       = "📈" if change >= 0 else "📉"
 
     if lang == "ar":
         lines = [
-            f"📊 *{name} ({symbol})*",
+            f"📊 *{name}*",
+            f"🏷️ `{symbol}`" + (f"  |  🏦 {exchange}" if exchange else ""),
             sep,
             f"💰 السعر: *${price:,.2f}*",
-            f"{emoji} التغيير: *{change:+,.2f} ({change_pct:+.2f}%)*",
-            f"📦 الحجم: *{volume:,}*",
+            f"{emoji} التغيير: *{change:+,.2f}  ({change_pct:+.2f}%)*",
         ]
+        if volume:
+            lines.append(f"📦 الحجم: {volume:,}")
         if mcap:
-            lines.append(f"💎 القيمة السوقية: *${mcap:,.0f}*")
+            lines.append(f"💎 القيمة السوقية: ${mcap:,.0f}")
         if pe:
-            lines.append(f"📐 P/E: *{pe:.2f}*")
+            lines.append(f"📐 P/E: {pe:.2f}")
+        lines.append(sep)
+        note = "⚠️ آخر سعر معروف" if stale else "🟢 بيانات حية"
+        lines.append(f"🕐 {updated}  {note}" if updated else note)
     else:
         lines = [
-            f"📊 *{name} ({symbol})*",
+            f"📊 *{name}*",
+            f"🏷️ `{symbol}`" + (f"  |  🏦 {exchange}" if exchange else ""),
             sep,
             f"💰 Price: *${price:,.2f}*",
-            f"{emoji} Change: *{change:+,.2f} ({change_pct:+.2f}%)*",
-            f"📦 Volume: *{volume:,}*",
+            f"{emoji} Change: *{change:+,.2f}  ({change_pct:+.2f}%)*",
         ]
+        if volume:
+            lines.append(f"📦 Volume: {volume:,}")
         if mcap:
-            lines.append(f"💎 Market Cap: *${mcap:,.0f}*")
+            lines.append(f"💎 Market Cap: ${mcap:,.0f}")
         if pe:
-            lines.append(f"📐 P/E: *{pe:.2f}*")
+            lines.append(f"📐 P/E: {pe:.2f}")
+        lines.append(sep)
+        note = "⚠️ Last known price" if stale else "🟢 Live"
+        lines.append(f"🕐 {updated}  {note}" if updated else note)
 
     return "\n".join(lines)
 

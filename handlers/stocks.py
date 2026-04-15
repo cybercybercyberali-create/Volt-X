@@ -13,16 +13,19 @@ router = Router(name="stocks")
 
 @router.message(Command("stock"))
 async def cmd_stock(message: Message, lang: str = "en") -> None:
-    symbol = message.text.replace("/stock", "").strip().upper() if message.text else ""
-    if not symbol:
-        await message.answer(t("stock_send_symbol", lang))
+    query = message.text.replace("/stock", "", 1).strip() if message.text else ""
+    if not query:
+        hint = "📈 أرسل اسم الشركة أو رمز السهم\nمثال: /stock ابل  أو  /stock AAPL" if lang == "ar" \
+            else "📈 Send a company name or ticker\nExample: /stock Apple  or  /stock AAPL"
+        await message.answer(hint)
         return
 
-    await message.answer(t("fetching", lang))
     try:
-        data = await omega_stocks.get_quote(symbol)
+        data = await omega_stocks.get_quote(query)
         if data.get("error"):
-            await message.answer(t("not_found", lang))
+            msg = f"❌ البيانات غير متوفرة حالياً من المصادر الحية\nالرمز: `{query}`" if lang == "ar" \
+                else f"❌ No live data available for `{query}`"
+            await message.answer(msg, parse_mode="Markdown")
             return
         await message.answer(stock_card(data, lang), parse_mode="Markdown")
     except Exception as exc:
