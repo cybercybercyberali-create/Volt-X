@@ -154,17 +154,26 @@ async def _send_live(target, lang: str) -> None:
 
 @router.message(Command("football"))
 async def cmd_football(message: Message, lang: str = "en") -> None:
-    args = message.text.split()[1:] if message.text else []
-    if not args:
+    # Strip /football prefix or any button label text, keep only the arg
+    raw = (message.text or "").strip()
+    # Remove /football command prefix or keyboard button text
+    for prefix in ("/football", "⚽ كرة قدم", "⚽ Football", "⚽"):
+        if raw.upper().startswith(prefix.upper()):
+            raw = raw[len(prefix):].strip()
+            break
+    arg = raw.upper()
+
+    if not arg:
+        # Show league selector
         await message.answer(t("fb_choose_league", lang), parse_mode="Markdown", reply_markup=_league_kb())
         return
-    arg = args[0].upper()
     if arg == "LIVE":
         await _send_live(message, lang)
     elif arg in MAJOR_LEAGUES:
         await _send_fixtures(message, arg, lang)
     else:
-        await message.answer(t("not_found", lang))
+        # Unknown arg — show selector instead of "not found"
+        await message.answer(t("fb_choose_league", lang), parse_mode="Markdown", reply_markup=_league_kb())
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("fb:"))

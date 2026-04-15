@@ -4301,6 +4301,20 @@ class OmegaFuel:
                         pass
             return prices
 
+        # Full browser-like headers to bypass Cloudflare / CDN blocks
+        _BROWSER = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "ar,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+        }
+
         # Source 0: IPT Group — try multiple URL variants
         ipt_urls = [
             "https://www.iptgroup.com.lb/ipt/e",
@@ -4310,7 +4324,7 @@ class OmegaFuel:
         ]
         for url in ipt_urls:
             try:
-                html = await self._scraper.fetch_html(url)
+                html = await self._scraper.fetch_html(url, headers=_BROWSER)
                 if not html or len(html) < 500:
                     continue
                 # Strip HTML tags for regex matching
@@ -6803,9 +6817,13 @@ async def cmd_fuel(message: Message, lang: str = "en") -> None:
         # ── Lebanon: render the rich visual card ──────────────────────────────
         if country == "LB":
             prices_raw = data.get("prices", {}) if not data.get("error") else {}
-            # Filter out non-price meta keys like "note"
-            prices_real = {k: v for k, v in prices_raw.items()
-                           if k != "note" and any(c.isdigit() for c in str(v))}
+            # Keep only LBP-formatted prices (must contain ل.ل or LL or LBP)
+            prices_real = {
+                k: v for k, v in prices_raw.items()
+                if k != "note"
+                and any(c.isdigit() for c in str(v))
+                and any(m in str(v) for m in ("ل.ل", "LL", "LBP", "لل"))
+            }
 
             # Fetch LBP/USD rate
             rate = await _fetch_exchange_rate()
@@ -6813,6 +6831,22 @@ async def cmd_fuel(message: Message, lang: str = "en") -> None:
             source_label = "IPT Group"
             ago = "—"
             if not prices_real:
+                # Fallback: GlobalPetrolPrices USD prices → convert to LBP for display
+                gpp_prices = {k: v for k, v in prices_raw.items()
+                              if k != "note" and "USD" in str(v) and any(c.isdigit() for c in str(v))}
+                if gpp_prices and rate:
+                    import re as _re
+                    converted = {}
+                    for fuel_name, usd_str in gpp_prices.items():
+                        m = _re.search(r"([\d.]+)", usd_str)
+                        if m:
+                            usd_per_l = float(m.group(1))
+                            llp = int(usd_per_l * rate)
+                            llp_20l = int(usd_per_l * rate * 20)
+                            converted[fuel_name] = f"{llp_20l:,} ل.ل."
+                    if converted:
+                        prices_real = converted
+                        source_label = "GlobalPetrolPrices"
                 # Fallback: last verified IPT Group weekly prices
                 prices_real = {
                     "بنزين 98": "2,460,000 ل.ل.",
@@ -7054,17 +7088,26 @@ async def _send_live(target, lang: str) -> None:
 
 @router.message(Command("football"))
 async def cmd_football(message: Message, lang: str = "en") -> None:
-    args = message.text.split()[1:] if message.text else []
-    if not args:
+    # Strip /football prefix or any button label text, keep only the arg
+    raw = (message.text or "").strip()
+    # Remove /football command prefix or keyboard button text
+    for prefix in ("/football", "⚽ كرة قدم", "⚽ Football", "⚽"):
+        if raw.upper().startswith(prefix.upper()):
+            raw = raw[len(prefix):].strip()
+            break
+    arg = raw.upper()
+
+    if not arg:
+        # Show league selector
         await message.answer(t("fb_choose_league", lang), parse_mode="Markdown", reply_markup=_league_kb())
         return
-    arg = args[0].upper()
     if arg == "LIVE":
         await _send_live(message, lang)
     elif arg in MAJOR_LEAGUES:
         await _send_fixtures(message, arg, lang)
     else:
-        await message.answer(t("not_found", lang))
+        # Unknown arg — show selector instead of "not found"
+        await message.answer(t("fb_choose_league", lang), parse_mode="Markdown", reply_markup=_league_kb())
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("fb:"))

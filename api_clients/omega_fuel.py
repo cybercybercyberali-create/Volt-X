@@ -115,6 +115,20 @@ class OmegaFuel:
                         pass
             return prices
 
+        # Full browser-like headers to bypass Cloudflare / CDN blocks
+        _BROWSER = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "ar,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+        }
+
         # Source 0: IPT Group — try multiple URL variants
         ipt_urls = [
             "https://www.iptgroup.com.lb/ipt/e",
@@ -124,7 +138,7 @@ class OmegaFuel:
         ]
         for url in ipt_urls:
             try:
-                html = await self._scraper.fetch_html(url)
+                html = await self._scraper.fetch_html(url, headers=_BROWSER)
                 if not html or len(html) < 500:
                     continue
                 # Strip HTML tags for regex matching

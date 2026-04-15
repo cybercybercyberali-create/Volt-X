@@ -92,9 +92,13 @@ async def cmd_fuel(message: Message, lang: str = "en") -> None:
         # ── Lebanon: render the rich visual card ──────────────────────────────
         if country == "LB":
             prices_raw = data.get("prices", {}) if not data.get("error") else {}
-            # Filter out non-price meta keys like "note"
-            prices_real = {k: v for k, v in prices_raw.items()
-                           if k != "note" and any(c.isdigit() for c in str(v))}
+            # Keep only LBP-formatted prices (must contain ل.ل or LL or LBP)
+            prices_real = {
+                k: v for k, v in prices_raw.items()
+                if k != "note"
+                and any(c.isdigit() for c in str(v))
+                and any(m in str(v) for m in ("ل.ل", "LL", "LBP", "لل"))
+            }
 
             # Fetch LBP/USD rate
             rate = await _fetch_exchange_rate()
@@ -102,6 +106,22 @@ async def cmd_fuel(message: Message, lang: str = "en") -> None:
             source_label = "IPT Group"
             ago = "—"
             if not prices_real:
+                # Fallback: GlobalPetrolPrices USD prices → convert to LBP for display
+                gpp_prices = {k: v for k, v in prices_raw.items()
+                              if k != "note" and "USD" in str(v) and any(c.isdigit() for c in str(v))}
+                if gpp_prices and rate:
+                    import re as _re
+                    converted = {}
+                    for fuel_name, usd_str in gpp_prices.items():
+                        m = _re.search(r"([\d.]+)", usd_str)
+                        if m:
+                            usd_per_l = float(m.group(1))
+                            llp = int(usd_per_l * rate)
+                            llp_20l = int(usd_per_l * rate * 20)
+                            converted[fuel_name] = f"{llp_20l:,} ل.ل."
+                    if converted:
+                        prices_real = converted
+                        source_label = "GlobalPetrolPrices"
                 # Fallback: last verified IPT Group weekly prices
                 prices_real = {
                     "بنزين 98": "2,460,000 ل.ل.",
