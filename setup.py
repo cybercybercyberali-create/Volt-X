@@ -4725,6 +4725,26 @@ MAJOR_LEAGUES = {
     "ELC": {"id": 40,  "name": "Championship",          "name_ar": "دوري الدرجة الأولى",     "country": "England"},
 }
 
+# Sofascore tournament IDs (free, no API key)
+_SF_TOURNAMENT_IDS: dict[str, int] = {
+    "PL":  17,
+    "PD":  8,
+    "SA":  23,
+    "BL1": 35,
+    "FL1": 37,
+    "CL":  7,
+    "SPL": 679,
+    "ELC": 44,
+}
+
+_SF_HEADERS: dict[str, str] = {
+    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0",
+    "Accept": "application/json",
+    "Accept-Language": "en-US,en;q=0.5",
+    "Origin": "https://www.sofascore.com",
+    "Referer": "https://www.sofascore.com/",
+}
+
 
 def _headers() -> dict:
     return {
@@ -4999,12 +5019,7 @@ class OmegaFootball:
             async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
                 r = await client.get(
                     "https://api.sofascore.com/api/v1/sport/football/events/live",
-                    headers={
-                        "User-Agent": "Mozilla/5.0 (compatible; SofascoreBot)",
-                        "Accept": "application/json",
-                        "Origin": "https://www.sofascore.com",
-                        "Referer": "https://www.sofascore.com/",
-                    },
+                    headers=_SF_HEADERS,
                 )
                 if r.status_code == 200:
                     events = r.json().get("events", [])
@@ -5019,35 +5034,106 @@ class OmegaFootball:
             return stale["data"]
         return {"error": True}
 
-    async def _sofascore_scheduled(self, date_str: str) -> list | dict:
-        """Fetch scheduled/recent matches from Sofascore for a date."""
-        cache_key = f"sofascore:sched:{date_str}"
+    async def _sofascore_raw_day(self, date_str: str) -> list:
+        """Fetch and cache raw Sofascore events for one day (un-normalized, includes tournament ID)."""
+        cache_key = f"sfsc:raw:{date_str}"
         cached = await cache.get(cache_key)
         if cached is not None:
             return cached
         try:
-            async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+            async with httpx.AsyncClient(timeout=8, follow_redirects=True) as client:
                 r = await client.get(
                     f"https://api.sofascore.com/api/v1/sport/football/scheduled-events/{date_str}",
-                    headers={
-                        "User-Agent": "Mozilla/5.0 (compatible; SofascoreBot)",
-                        "Accept": "application/json",
-                        "Origin": "https://www.sofascore.com",
-                        "Referer": "https://www.sofascore.com/",
-                    },
+                    headers=_SF_HEADERS,
                 )
                 if r.status_code == 200:
                     events = r.json().get("events", [])
-                    # Filter to major leagues only
-                    _SF_LEAGUE_IDS = {17, 8, 23, 35, 37, 7, 44, 679}  # PL, CL, La Liga, etc.
-                    filtered = [e for e in events if e.get("tournament", {}).get("id") in _SF_LEAGUE_IDS]
-                    fixtures = [_normalize_sofascore(e) for e in (filtered or events)[:20]]
-                    fixtures = [f for f in fixtures if f]
-                    await cache.set(cache_key, fixtures, ttl=CACHE_TTL.get("football_static", 3600))
-                    return fixtures if fixtures else {"error": True}
+                    await cache.set(cache_key, events, ttl=3600 * 6)
+                    return events
         except Exception as exc:
-            logger.warning(f"Sofascore scheduled error: {exc}")
+            logger.warning(f"Sofascore raw day {date_str}: {exc}")
+        return []
+
+    async def _sofascore_scheduled(self, date_str: str) -> list | dict:
+        """Fetch scheduled/recent matches from Sofascore for a date (normalized)."""
+        cache_key = f"sofascore:sched:{date_str}"
+        cached = await cache.get(cache_key)
+        if cached is not None:
+            return cached
+        events = await self._sofascore_raw_day(date_str)
+        if events:
+            _SF_LEAGUE_IDS = set(_SF_TOURNAMENT_IDS.values())
+            filtered = [e for e in events if e.get("tournament", {}).get("id") in _SF_LEAGUE_IDS]
+            fixtures = [_normalize_sofascore(e) for e in (filtered or events)[:20]]
+            fixtures = [f for f in fixtures if f]
+            if fixtures:
+                await cache.set(cache_key, fixtures, ttl=CACHE_TTL.get("football_static", 3600))
+                return fixtures
         return {"error": True}
+
+    async def get_league_teams(self, league_code: str) -> list[dict]:
+        """Return sorted [{id, name}] for all teams seen in ±8 days of league fixtures."""
+        sf_id = _SF_TOURNAMENT_IDS.get(league_code.upper())
+        cache_key = f"sfsc:league_teams:{league_code.upper()}"
+        cached = await cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        from datetime import date, timedelta
+        today = date.today()
+        teams: dict[int, str] = {}
+
+        for delta in range(-4, 9):
+            day = (today + timedelta(days=delta)).strftime("%Y-%m-%d")
+            events = await self._sofascore_raw_day(day)
+            for ev in events:
+                if sf_id and ev.get("tournament", {}).get("id") != sf_id:
+                    continue
+                for side in ("homeTeam", "awayTeam"):
+                    team = ev.get(side, {})
+                    tid, tname = team.get("id"), team.get("name", "")
+                    if tid and tname:
+                        teams[tid] = tname
+
+        result = sorted([{"id": k, "name": v} for k, v in teams.items()], key=lambda x: x["name"])
+        if result:
+            await cache.set(cache_key, result, ttl=3600 * 12)
+        return result
+
+    async def get_team_schedule(self, team_id: int) -> dict:
+        """Fetch last-5 + next-5 matches for a team from Sofascore."""
+        cache_key = f"sfsc:team_sched:{team_id}"
+        cached = await cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        past: list[dict] = []
+        upcoming_raw: list[dict] = []
+
+        for path, dest in (("events/last/0", past), ("events/next/0", upcoming_raw)):
+            try:
+                async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+                    r = await client.get(
+                        f"https://api.sofascore.com/api/v1/team/{team_id}/{path}",
+                        headers=_SF_HEADERS,
+                    )
+                    if r.status_code == 200:
+                        for ev in r.json().get("events", []):
+                            n = _normalize_sofascore(ev)
+                            if n:
+                                dest.append(n)
+            except Exception as exc:
+                logger.warning(f"Sofascore team {path}: {exc}")
+
+        # most recent first; cap at 5
+        past = list(reversed(past[-5:]))
+        live     = [f for f in upcoming_raw if f["status"] not in ("NS", "TBD", "PST", "CANC")]
+        upcoming = [f for f in upcoming_raw if f["status"] in ("NS", "TBD")][:5]
+
+        has_data = bool(past or live or upcoming)
+        result = {"past": past, "live": live, "upcoming": upcoming, "error": not has_data}
+        await cache.set(cache_key, result, ttl=60 if live else 300)
+        return result
 
     async def get_events(self, fixture_id: int) -> list | dict:
         """Fetch match events: goals, cards, substitutions."""
@@ -6978,11 +7064,32 @@ router = Router(name="football")
 
 _BEIRUT = ZoneInfo("Asia/Beirut")
 
+_MONTHS_AR = [
+    "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
+    "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر",
+]
+
 
 def _fmt_local(date_utc: str) -> str:
     try:
         dt = datetime.fromisoformat(date_utc.replace("Z", "+00:00"))
         return dt.astimezone(_BEIRUT).strftime("%H:%M")
+    except Exception:
+        return "—"
+
+
+def _fmt_full(date_utc: str) -> str:
+    try:
+        dt = datetime.fromisoformat(date_utc.replace("Z", "+00:00")).astimezone(_BEIRUT)
+        return f"{dt.day} {_MONTHS_AR[dt.month - 1]}  {dt.strftime('%H:%M')}"
+    except Exception:
+        return "—"
+
+
+def _fmt_short_date(date_utc: str) -> str:
+    try:
+        dt = datetime.fromisoformat(date_utc.replace("Z", "+00:00")).astimezone(_BEIRUT)
+        return f"{dt.day:02d}/{dt.month:02d}"
     except Exception:
         return "—"
 
@@ -7020,7 +7127,6 @@ def _card(f: dict) -> str:
 
 
 def _card_kb(f: dict) -> InlineKeyboardMarkup | None:
-    """Show events button only for started/finished matches."""
     fid = f.get("fixture_id")
     if fid and f.get("status") not in ("NS", "TBD"):
         return InlineKeyboardMarkup(inline_keyboard=[[
@@ -7030,7 +7136,6 @@ def _card_kb(f: dict) -> InlineKeyboardMarkup | None:
 
 
 def _fmt_events(events: list) -> str:
-    """Format match events into a readable card."""
     if not events:
         return "لا توجد أحداث مسجلة بعد"
     lines: list[str] = []
@@ -7044,12 +7149,7 @@ def _fmt_events(events: list) -> str:
         time_str = f"`{elapsed}+{extra}'`" if extra else f"`{elapsed}'`"
 
         if ev_type == "Goal":
-            if "Own Goal" in detail:
-                icon = "🔙"
-            elif "Penalty" in detail:
-                icon = "🎯"
-            else:
-                icon = "⚽"
+            icon = "🔙" if "Own Goal" in detail else ("🎯" if "Penalty" in detail else "⚽")
         elif ev_type == "Card":
             icon = "🟥" if "Red" in detail else "🟨"
         elif ev_type in ("subst", "Subst"):
@@ -7075,16 +7175,77 @@ def _league_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def _team_kb(teams: list, league_code: str) -> InlineKeyboardMarkup:
+    btns = [
+        InlineKeyboardButton(
+            text=t["name"],
+            callback_data=f"fb_t:{t['id']}:{league_code}",
+        )
+        for t in teams[:24]
+    ]
+    rows = [btns[i:i+2] for i in range(0, len(btns), 2)]
+    rows.append([InlineKeyboardButton(text="🔙 الدوريات", callback_data="fb:menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _result_emoji(f: dict, team_name: str) -> str:
+    if f.get("status") != "FT":
+        return "⬜"
+    h, a = f.get("home_score"), f.get("away_score")
+    if h is None or a is None:
+        return "⬜"
+    is_home = f.get("home", "") == team_name
+    my_g = h if is_home else a
+    op_g = a if is_home else h
+    if my_g > op_g:   return "🟢"
+    if my_g == op_g:  return "🟡"
+    return "🔴"
+
+
+def _team_schedule_card(sched: dict, team_name: str, league_ar: str) -> str:
+    SEP = "━━━━━━━━━━━━"
+    lines = [f"⚽ *{league_ar}*", f"🏆 *{team_name}*", SEP]
+
+    if sched.get("live"):
+        lines.append("🔴 *مباشر الآن*")
+        for f in sched["live"]:
+            el = f.get("status_elapsed", "")
+            el_str = f"  `{el}'`" if el else ""
+            h_s = f.get("home_score", 0)
+            a_s = f.get("away_score", 0)
+            lines.append(f"  *{f['home']}*  {h_s} — {a_s}  *{f['away']}*{el_str}")
+        lines.append(SEP)
+
+    if sched.get("past"):
+        lines.append("📅 *الأخيرة*")
+        for f in sched["past"][:5]:
+            res = _result_emoji(f, team_name)
+            h_s = f.get("home_score", "?")
+            a_s = f.get("away_score", "?")
+            d   = _fmt_short_date(f.get("date_utc", ""))
+            lines.append(f"{res}  `{d}`  {f['home']}  {h_s}–{a_s}  {f['away']}")
+        lines.append(SEP)
+
+    if sched.get("upcoming"):
+        lines.append("📆 *القادمة*")
+        for f in sched["upcoming"][:5]:
+            dt = _fmt_full(f.get("date_utc", ""))
+            lines.append(f"⬜  {f['home']}  🆚  {f['away']}")
+            lines.append(f"     `{dt}`")
+
+    return "\n".join(lines)
+
+
 def _today(fixtures: list) -> list:
     today = datetime.now(timezone.utc).date().isoformat()
     return [f for f in fixtures if f.get("date_utc", "").startswith(today)]
 
 
 def _nearest(fixtures: list) -> list:
-    upcoming = sorted([f for f in fixtures if f.get("status") == "NS"], key=lambda f: f.get("date_utc",""))
+    upcoming = sorted([f for f in fixtures if f.get("status") == "NS"], key=lambda f: f.get("date_utc", ""))
     if upcoming:
         return upcoming[:8]
-    return sorted([f for f in fixtures if f.get("status") == "FT"], key=lambda f: f.get("date_utc",""), reverse=True)[:8]
+    return sorted([f for f in fixtures if f.get("status") == "FT"], key=lambda f: f.get("date_utc", ""), reverse=True)[:8]
 
 
 async def _send_fixtures(target, league_code: str, lang: str) -> None:
@@ -7118,9 +7279,7 @@ async def _send_live(target, lang: str) -> None:
 
 @router.message(Command("football"))
 async def cmd_football(message: Message, lang: str = "en") -> None:
-    # Strip /football prefix or any button label text, keep only the arg
     raw = (message.text or "").strip()
-    # Remove /football command prefix or keyboard button text
     for prefix in ("/football", "⚽ كرة قدم", "⚽ Football", "⚽"):
         if raw.upper().startswith(prefix.upper()):
             raw = raw[len(prefix):].strip()
@@ -7128,7 +7287,6 @@ async def cmd_football(message: Message, lang: str = "en") -> None:
     arg = raw.upper()
 
     if not arg:
-        # Show league selector
         await message.answer(t("fb_choose_league", lang), parse_mode="Markdown", reply_markup=_league_kb())
         return
     if arg == "LIVE":
@@ -7136,19 +7294,86 @@ async def cmd_football(message: Message, lang: str = "en") -> None:
     elif arg in MAJOR_LEAGUES:
         await _send_fixtures(message, arg, lang)
     else:
-        # Unknown arg — show selector instead of "not found"
         await message.answer(t("fb_choose_league", lang), parse_mode="Markdown", reply_markup=_league_kb())
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("fb:"))
 async def handle_fb_cb(callback: CallbackQuery, lang: str = "en") -> None:
     await callback.answer()
-    parts = callback.data.split(":")
+    parts  = callback.data.split(":")
     action = parts[1] if len(parts) > 1 else ""
+
     if action == "live":
         await _send_live(callback, lang)
-    elif action.upper() in MAJOR_LEAGUES:
-        await _send_fixtures(callback, action.upper(), lang)
+        return
+
+    if action == "menu":
+        try:
+            await callback.message.edit_text(
+                t("fb_choose_league", lang),
+                parse_mode="Markdown",
+                reply_markup=_league_kb(),
+            )
+        except Exception:
+            await callback.message.answer(
+                t("fb_choose_league", lang),
+                parse_mode="Markdown",
+                reply_markup=_league_kb(),
+            )
+        return
+
+    league_code = action.upper()
+    if league_code not in MAJOR_LEAGUES:
+        return
+
+    league_ar = MAJOR_LEAGUES[league_code]["name_ar"]
+    teams = await omega_football.get_league_teams(league_code)
+
+    if teams:
+        text = f"⚽ *{league_ar}*\n\n🏟️ اختر الفريق:"
+        try:
+            await callback.message.edit_text(
+                text, parse_mode="Markdown",
+                reply_markup=_team_kb(teams, league_code),
+            )
+        except Exception:
+            await callback.message.answer(
+                text, parse_mode="Markdown",
+                reply_markup=_team_kb(teams, league_code),
+            )
+    else:
+        await _send_fixtures(callback, league_code, lang)
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("fb_t:"))
+async def handle_fb_team_cb(callback: CallbackQuery, lang: str = "en") -> None:
+    await callback.answer("⏳")
+    parts = callback.data.split(":")
+    if len(parts) < 3:
+        return
+    try:
+        team_id     = int(parts[1])
+        league_code = parts[2].upper()
+    except (ValueError, IndexError):
+        return
+
+    league_ar = MAJOR_LEAGUES.get(league_code, {}).get("name_ar", league_code)
+    teams     = await omega_football.get_league_teams(league_code)
+    team_info = next((x for x in teams if x["id"] == team_id), None)
+    team_name = team_info["name"] if team_info else f"Team #{team_id}"
+
+    sched = await omega_football.get_team_schedule(team_id)
+
+    if sched.get("error"):
+        await callback.message.answer(t("error", lang))
+        return
+
+    card = _team_schedule_card(sched, team_name, league_ar)
+    back_kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="🔙 الفرق",  callback_data=f"fb:{league_code.lower()}"),
+        InlineKeyboardButton(text="🔄 تحديث",  callback_data=f"fb_t:{team_id}:{league_code}"),
+    ]])
+    await callback.message.answer(card, parse_mode="Markdown", reply_markup=back_kb)
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("fb_ev:"))

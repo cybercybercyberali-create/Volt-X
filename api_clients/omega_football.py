@@ -23,6 +23,26 @@ MAJOR_LEAGUES = {
     "ELC": {"id": 40,  "name": "Championship",          "name_ar": "دوري الدرجة الأولى",     "country": "England"},
 }
 
+# Sofascore tournament IDs (free, no API key)
+_SF_TOURNAMENT_IDS: dict[str, int] = {
+    "PL":  17,
+    "PD":  8,
+    "SA":  23,
+    "BL1": 35,
+    "FL1": 37,
+    "CL":  7,
+    "SPL": 679,
+    "ELC": 44,
+}
+
+_SF_HEADERS: dict[str, str] = {
+    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0",
+    "Accept": "application/json",
+    "Accept-Language": "en-US,en;q=0.5",
+    "Origin": "https://www.sofascore.com",
+    "Referer": "https://www.sofascore.com/",
+}
+
 
 def _headers() -> dict:
     return {
@@ -297,12 +317,7 @@ class OmegaFootball:
             async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
                 r = await client.get(
                     "https://api.sofascore.com/api/v1/sport/football/events/live",
-                    headers={
-                        "User-Agent": "Mozilla/5.0 (compatible; SofascoreBot)",
-                        "Accept": "application/json",
-                        "Origin": "https://www.sofascore.com",
-                        "Referer": "https://www.sofascore.com/",
-                    },
+                    headers=_SF_HEADERS,
                 )
                 if r.status_code == 200:
                     events = r.json().get("events", [])
@@ -317,35 +332,106 @@ class OmegaFootball:
             return stale["data"]
         return {"error": True}
 
-    async def _sofascore_scheduled(self, date_str: str) -> list | dict:
-        """Fetch scheduled/recent matches from Sofascore for a date."""
-        cache_key = f"sofascore:sched:{date_str}"
+    async def _sofascore_raw_day(self, date_str: str) -> list:
+        """Fetch and cache raw Sofascore events for one day (un-normalized, includes tournament ID)."""
+        cache_key = f"sfsc:raw:{date_str}"
         cached = await cache.get(cache_key)
         if cached is not None:
             return cached
         try:
-            async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+            async with httpx.AsyncClient(timeout=8, follow_redirects=True) as client:
                 r = await client.get(
                     f"https://api.sofascore.com/api/v1/sport/football/scheduled-events/{date_str}",
-                    headers={
-                        "User-Agent": "Mozilla/5.0 (compatible; SofascoreBot)",
-                        "Accept": "application/json",
-                        "Origin": "https://www.sofascore.com",
-                        "Referer": "https://www.sofascore.com/",
-                    },
+                    headers=_SF_HEADERS,
                 )
                 if r.status_code == 200:
                     events = r.json().get("events", [])
-                    # Filter to major leagues only
-                    _SF_LEAGUE_IDS = {17, 8, 23, 35, 37, 7, 44, 679}  # PL, CL, La Liga, etc.
-                    filtered = [e for e in events if e.get("tournament", {}).get("id") in _SF_LEAGUE_IDS]
-                    fixtures = [_normalize_sofascore(e) for e in (filtered or events)[:20]]
-                    fixtures = [f for f in fixtures if f]
-                    await cache.set(cache_key, fixtures, ttl=CACHE_TTL.get("football_static", 3600))
-                    return fixtures if fixtures else {"error": True}
+                    await cache.set(cache_key, events, ttl=3600 * 6)
+                    return events
         except Exception as exc:
-            logger.warning(f"Sofascore scheduled error: {exc}")
+            logger.warning(f"Sofascore raw day {date_str}: {exc}")
+        return []
+
+    async def _sofascore_scheduled(self, date_str: str) -> list | dict:
+        """Fetch scheduled/recent matches from Sofascore for a date (normalized)."""
+        cache_key = f"sofascore:sched:{date_str}"
+        cached = await cache.get(cache_key)
+        if cached is not None:
+            return cached
+        events = await self._sofascore_raw_day(date_str)
+        if events:
+            _SF_LEAGUE_IDS = set(_SF_TOURNAMENT_IDS.values())
+            filtered = [e for e in events if e.get("tournament", {}).get("id") in _SF_LEAGUE_IDS]
+            fixtures = [_normalize_sofascore(e) for e in (filtered or events)[:20]]
+            fixtures = [f for f in fixtures if f]
+            if fixtures:
+                await cache.set(cache_key, fixtures, ttl=CACHE_TTL.get("football_static", 3600))
+                return fixtures
         return {"error": True}
+
+    async def get_league_teams(self, league_code: str) -> list[dict]:
+        """Return sorted [{id, name}] for all teams seen in ±8 days of league fixtures."""
+        sf_id = _SF_TOURNAMENT_IDS.get(league_code.upper())
+        cache_key = f"sfsc:league_teams:{league_code.upper()}"
+        cached = await cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        from datetime import date, timedelta
+        today = date.today()
+        teams: dict[int, str] = {}
+
+        for delta in range(-4, 9):
+            day = (today + timedelta(days=delta)).strftime("%Y-%m-%d")
+            events = await self._sofascore_raw_day(day)
+            for ev in events:
+                if sf_id and ev.get("tournament", {}).get("id") != sf_id:
+                    continue
+                for side in ("homeTeam", "awayTeam"):
+                    team = ev.get(side, {})
+                    tid, tname = team.get("id"), team.get("name", "")
+                    if tid and tname:
+                        teams[tid] = tname
+
+        result = sorted([{"id": k, "name": v} for k, v in teams.items()], key=lambda x: x["name"])
+        if result:
+            await cache.set(cache_key, result, ttl=3600 * 12)
+        return result
+
+    async def get_team_schedule(self, team_id: int) -> dict:
+        """Fetch last-5 + next-5 matches for a team from Sofascore."""
+        cache_key = f"sfsc:team_sched:{team_id}"
+        cached = await cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        past: list[dict] = []
+        upcoming_raw: list[dict] = []
+
+        for path, dest in (("events/last/0", past), ("events/next/0", upcoming_raw)):
+            try:
+                async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+                    r = await client.get(
+                        f"https://api.sofascore.com/api/v1/team/{team_id}/{path}",
+                        headers=_SF_HEADERS,
+                    )
+                    if r.status_code == 200:
+                        for ev in r.json().get("events", []):
+                            n = _normalize_sofascore(ev)
+                            if n:
+                                dest.append(n)
+            except Exception as exc:
+                logger.warning(f"Sofascore team {path}: {exc}")
+
+        # most recent first; cap at 5
+        past = list(reversed(past[-5:]))
+        live     = [f for f in upcoming_raw if f["status"] not in ("NS", "TBD", "PST", "CANC")]
+        upcoming = [f for f in upcoming_raw if f["status"] in ("NS", "TBD")][:5]
+
+        has_data = bool(past or live or upcoming)
+        result = {"past": past, "live": live, "upcoming": upcoming, "error": not has_data}
+        await cache.set(cache_key, result, ttl=60 if live else 300)
+        return result
 
     async def get_events(self, fixture_id: int) -> list | dict:
         """Fetch match events: goals, cards, substitutions."""
