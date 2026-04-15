@@ -5743,17 +5743,18 @@ _HEADERS = {
 _RSS_FEEDS = {
     "en": [
         "https://news.google.com/rss?hl=en&gl=US&ceid=US:en",
+        "https://feeds.bbci.co.uk/news/world/rss.xml",
         "https://feeds.skynews.com/feeds/rss/world.xml",
         "https://www.theguardian.com/world/rss",
-        "https://feeds.bbci.co.uk/news/world/rss.xml",
-        "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",
+        "https://feeds.reuters.com/reuters/topNews",
     ],
     "ar": [
-        "https://news.google.com/rss?hl=ar&gl=LB&ceid=LB:ar",
         "https://news.google.com/rss?hl=ar&gl=SA&ceid=SA:ar",
-        "https://www.skynewsarabia.com/rss.xml",
-        "https://www.aljazeera.net/aljazeerarss/a7c186be-1baa-4bd4-9d80-a84db769f779/73d0e1b4-532f-45ef-b135-bfdff8b8cab9",
+        "https://news.google.com/rss?hl=ar&gl=LB&ceid=LB:ar",
+        "https://www.aljazeera.net/xml/rss/all.xml",
         "https://www.bbc.com/arabic/rss.xml",
+        "https://www.skynewsarabia.com/rss.xml",
+        "https://arabic.rt.com/rss/",
     ],
 }
 
@@ -6318,15 +6319,13 @@ router = Router(name="start")
 # Bilingual button labels. The text sent to the bot is the Arabic or English label.
 _KB_AR = [
     ["⛽ محروقات",  "🌤 طقس",      "🥇 ذهب"],
-    ["💱 عملة",     "₿ كريبتو",   "📈 أسهم"],
-    ["📰 أخبار",   "⚽ كرة قدم",  "🎬 أفلام"],
+    ["💱 عملة",     "⚽ كرة قدم",  "🎬 أفلام"],
     ["🤖 ذكاء اصطناعي", "✈️ رحلات", "🌍 زلازل"],
     ["⚙️ إعدادات"],
 ]
 _KB_EN = [
     ["⛽ Fuel",     "🌤 Weather",  "🥇 Gold"],
-    ["💱 Currency", "₿ Crypto",   "📈 Stocks"],
-    ["📰 News",     "⚽ Football", "🎬 Movies"],
+    ["💱 Currency", "⚽ Football", "🎬 Movies"],
     ["🤖 AI Chat",  "✈️ Flights",  "🌍 Quakes"],
     ["⚙️ Settings"],
 ]
@@ -6348,9 +6347,6 @@ _BTN_MAP.update({
     "🌤 طقس": "weather",     "🌤 Weather": "weather",
     "🥇 ذهب": "gold",        "🥇 Gold": "gold",
     "💱 عملة": "currency",   "💱 Currency": "currency",
-    "₿ كريبتو": "crypto",    "₿ Crypto": "crypto",
-    "📈 أسهم": "stocks",     "📈 Stocks": "stocks",
-    "📰 أخبار": "news",      "📰 News": "news",
     "⚽ كرة قدم": "football","⚽ Football": "football",
     "🎬 أفلام": "movies",    "🎬 Movies": "movies",
     "🤖 ذكاء اصطناعي": "ai","🤖 AI Chat": "ai",
@@ -6963,15 +6959,16 @@ async def cmd_fuel(message: Message, lang: str = "en") -> None:
                         source_label = "GlobalPetrolPrices"
 
             if not _has_canonical_prices(prices_real):
-                # Static fallback: last verified IPT Group weekly prices
+                # Static fallback — IPT Group weekly prices (أبريل 2026)
+                # تُحدَّث يدوياً كل أسبوع من موقع IPT Group
                 prices_real = {
-                    "بنزين 98": "2,460,000 ل.ل.",
-                    "بنزين 95": "2,376,000 ل.ل.",
-                    "ديزل":     "2,442,000 ل.ل.",
-                    "غاز 10kg": "980,000 ل.ل.",
+                    "بنزين 98": "2,519,000 ل.ل.",
+                    "بنزين 95": "2,431,000 ل.ل.",
+                    "ديزل":     "2,248,000 ل.ل.",
+                    "غاز 10kg": "1,015,000 ل.ل.",
                 }
-                source_label = "IPT Group (آخر بيانات)"
-                ago = "غير محدد"
+                source_label = "IPT Group (أبريل 2026)"
+                ago = "تقريبي"
 
             card_text = fuel_card(
                 prices_llp=prices_real,
@@ -8102,7 +8099,12 @@ def _card(article: dict, lang: str) -> str:
 
 @router.message(Command("news"))
 async def cmd_news(message: Message, lang: str = "en") -> None:
-    query = message.text.replace("/news", "", 1).strip() if message.text else ""
+    raw = message.text or ""
+    for prefix in ("/news", "📰 أخبار", "📰 News", "📰"):
+        if raw.lower().startswith(prefix.lower()):
+            raw = raw[len(prefix):].strip()
+            break
+    query = raw
     try:
         if query:
             data = await omega_news.search_news(query, lang=lang)

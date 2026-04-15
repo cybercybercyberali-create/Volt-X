@@ -19,15 +19,13 @@ router = Router(name="start")
 # Bilingual button labels. The text sent to the bot is the Arabic or English label.
 _KB_AR = [
     ["⛽ محروقات",  "🌤 طقس",      "🥇 ذهب"],
-    ["💱 عملة",     "₿ كريبتو",   "📈 أسهم"],
-    ["📰 أخبار",   "⚽ كرة قدم",  "🎬 أفلام"],
+    ["💱 عملة",     "⚽ كرة قدم",  "🎬 أفلام"],
     ["🤖 ذكاء اصطناعي", "✈️ رحلات", "🌍 زلازل"],
     ["⚙️ إعدادات"],
 ]
 _KB_EN = [
     ["⛽ Fuel",     "🌤 Weather",  "🥇 Gold"],
-    ["💱 Currency", "₿ Crypto",   "📈 Stocks"],
-    ["📰 News",     "⚽ Football", "🎬 Movies"],
+    ["💱 Currency", "⚽ Football", "🎬 Movies"],
     ["🤖 AI Chat",  "✈️ Flights",  "🌍 Quakes"],
     ["⚙️ Settings"],
 ]
@@ -49,9 +47,6 @@ _BTN_MAP.update({
     "🌤 طقس": "weather",     "🌤 Weather": "weather",
     "🥇 ذهب": "gold",        "🥇 Gold": "gold",
     "💱 عملة": "currency",   "💱 Currency": "currency",
-    "₿ كريبتو": "crypto",    "₿ Crypto": "crypto",
-    "📈 أسهم": "stocks",     "📈 Stocks": "stocks",
-    "📰 أخبار": "news",      "📰 News": "news",
     "⚽ كرة قدم": "football","⚽ Football": "football",
     "🎬 أفلام": "movies",    "🎬 Movies": "movies",
     "🤖 ذكاء اصطناعي": "ai","🤖 AI Chat": "ai",

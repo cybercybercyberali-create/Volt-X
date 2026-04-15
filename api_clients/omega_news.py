@@ -29,17 +29,18 @@ _HEADERS = {
 _RSS_FEEDS = {
     "en": [
         "https://news.google.com/rss?hl=en&gl=US&ceid=US:en",
+        "https://feeds.bbci.co.uk/news/world/rss.xml",
         "https://feeds.skynews.com/feeds/rss/world.xml",
         "https://www.theguardian.com/world/rss",
-        "https://feeds.bbci.co.uk/news/world/rss.xml",
-        "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",
+        "https://feeds.reuters.com/reuters/topNews",
     ],
     "ar": [
-        "https://news.google.com/rss?hl=ar&gl=LB&ceid=LB:ar",
         "https://news.google.com/rss?hl=ar&gl=SA&ceid=SA:ar",
-        "https://www.skynewsarabia.com/rss.xml",
-        "https://www.aljazeera.net/aljazeerarss/a7c186be-1baa-4bd4-9d80-a84db769f779/73d0e1b4-532f-45ef-b135-bfdff8b8cab9",
+        "https://news.google.com/rss?hl=ar&gl=LB&ceid=LB:ar",
+        "https://www.aljazeera.net/xml/rss/all.xml",
         "https://www.bbc.com/arabic/rss.xml",
+        "https://www.skynewsarabia.com/rss.xml",
+        "https://arabic.rt.com/rss/",
     ],
 }
 

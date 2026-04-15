@@ -165,15 +165,16 @@ async def cmd_fuel(message: Message, lang: str = "en") -> None:
                         source_label = "GlobalPetrolPrices"
 
             if not _has_canonical_prices(prices_real):
-                # Static fallback: last verified IPT Group weekly prices
+                # Static fallback — IPT Group weekly prices (أبريل 2026)
+                # تُحدَّث يدوياً كل أسبوع من موقع IPT Group
                 prices_real = {
-                    "بنزين 98": "2,460,000 ل.ل.",
-                    "بنزين 95": "2,376,000 ل.ل.",
-                    "ديزل":     "2,442,000 ل.ل.",
-                    "غاز 10kg": "980,000 ل.ل.",
+                    "بنزين 98": "2,519,000 ل.ل.",
+                    "بنزين 95": "2,431,000 ل.ل.",
+                    "ديزل":     "2,248,000 ل.ل.",
+                    "غاز 10kg": "1,015,000 ل.ل.",
                 }
-                source_label = "IPT Group (آخر بيانات)"
-                ago = "غير محدد"
+                source_label = "IPT Group (أبريل 2026)"
+                ago = "تقريبي"
 
             card_text = fuel_card(
                 prices_llp=prices_real,

@@ -64,7 +64,12 @@ def _card(article: dict, lang: str) -> str:
 
 @router.message(Command("news"))
 async def cmd_news(message: Message, lang: str = "en") -> None:
-    query = message.text.replace("/news", "", 1).strip() if message.text else ""
+    raw = message.text or ""
+    for prefix in ("/news", "📰 أخبار", "📰 News", "📰"):
+        if raw.lower().startswith(prefix.lower()):
+            raw = raw[len(prefix):].strip()
+            break
+    query = raw
     try:
         if query:
             data = await omega_news.search_news(query, lang=lang)
