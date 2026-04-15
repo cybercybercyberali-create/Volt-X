@@ -168,12 +168,12 @@ async def cmd_fuel(message: Message, lang: str = "en") -> None:
                 # Static fallback — IPT Group weekly prices (أبريل 2026)
                 # تُحدَّث يدوياً كل أسبوع من موقع IPT Group
                 prices_real = {
-                    "بنزين 98": "2,519,000 ل.ل.",
-                    "بنزين 95": "2,431,000 ل.ل.",
-                    "ديزل":     "2,248,000 ل.ل.",
-                    "غاز 10kg": "1,015,000 ل.ل.",
+                    "بنزين 98": "2,427,000 ل.ل.",
+                    "بنزين 95": "2,386,000 ل.ل.",
+                    "ديزل":     "2,495,000 ل.ل.",
+                    "غاز 10kg": "1,751,000 ل.ل.",
                 }
-                source_label = "IPT Group (أبريل 2026)"
+                source_label = "IPT Group (14 أبريل 2026)"
                 ago = "تقريبي"
 
             card_text = fuel_card(
