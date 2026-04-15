@@ -7037,7 +7037,12 @@ _CURRENCY_KW= {"عملة", "currency", "دولار", "dollar", "يورو", "euro
                "ليرة", "lira", "ريال", "riyal", "درهم", "dirham", "pound", "جنيه",
                "سعر صرف", "exchange rate", "سعر اليوم", "سعر الدولار", "سعر العملة",
                "سعر الصرف", "يعر صرف", "صرف اليوم", "الدولار اليوم", "usd", "eur",
-               "كم الدولار", "كم سعر"}
+               "كم الدولار", "كم سعر", "حول", "تحويل", "يساوي", "convert",
+               "فرنك", "ين", "دينار", "فلس", "جنيه مصري"}
+_FOOTBALL_KW= {"كرة قدم", "football", "مباراة", "مباريات", "دوري", "league", "هدف", "goals",
+               "نتيجة", "score", "فريق", "team", "برشلونة", "ريال مدريد", "مانشستر",
+               "ليفربول", "تشيلسي", "بايرن", "يوفنتوس", "دوري أبطال", "champions",
+               "فيفا", "fifa", "الدوري الإنجليزي", "premier league", "laliga", "سيريا"}
 _FUEL_KW    = {"بنزين", "benzin", "fuel", "محروقات", "وقود", "diesel", "ديزل", "petrol",
                "سعر البنزين", "محروقات", "بنزين 95", "بنزين 98"}
 _STOCK_KW   = {"سهم", "اسهم", "stock", "stocks", "بورصة", "nasdaq", "سوق مال", "أسهم"}
@@ -7302,6 +7307,17 @@ async def _route_to_service(message: Message, query: str, lang: str) -> bool:
             return True
         except Exception as exc:
             logger.debug(f"News routing error: {exc}")
+            await message.answer(t("error", lang))
+            return True
+
+    # Football
+    if _has_kw(query, _FOOTBALL_KW):
+        try:
+            from handlers.football import cmd_football
+            await cmd_football(message, lang=lang)
+            return True
+        except Exception as exc:
+            logger.debug(f"Football routing error: {exc}")
             await message.answer(t("error", lang))
             return True
 
