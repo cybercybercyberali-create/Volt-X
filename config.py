@@ -215,7 +215,7 @@ PROVIDER_KEY_MAP = {
     "fireworks": "together_api_key",
     "hyperbolic": "together_api_key",
     "kluster": "together_api_key",
-    "llm7": "together_api_key",
+    "llm7": None,              # llm7.io — free, no key needed
     "sambanova": "sambanova_api_key",
     "pollinations": None,
 }

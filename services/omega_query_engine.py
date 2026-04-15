@@ -46,8 +46,8 @@ class OmegaQueryEngine:
             tasks.append(self._query_single(model, prompt, system_prompt))
 
         if not tasks:
-            logger.warning("No models available, using fallback")
-            fallback = next((m for m in AI_MODELS if m["provider"] == "pollinations"), AI_MODELS[-1])
+            logger.warning("No models available, using Pollinations fallback")
+            fallback = next((m for m in AI_MODELS if m["provider"] in ("pollinations", "llm7")), AI_MODELS[-1])
             tasks = [self._query_single(fallback, prompt, system_prompt)]
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
