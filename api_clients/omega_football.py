@@ -164,5 +164,29 @@ class OmegaFootball:
             return stale["data"]
         return {"error": True}
 
+    async def get_events(self, fixture_id: int) -> list | dict:
+        """Fetch match events: goals, cards, substitutions."""
+        cache_key = f"apifb:events:{fixture_id}"
+        cached = await cache.get(cache_key)
+        if cached is not None:
+            return cached
+        data = await self._get("/fixtures/events", {"fixture": fixture_id})
+        if data and "response" in data:
+            events = []
+            for ev in data["response"]:
+                ev_time = ev.get("time", {})
+                events.append({
+                    "team":    ev.get("team",   {}).get("name", ""),
+                    "player":  ev.get("player", {}).get("name", ""),
+                    "assist":  ev.get("assist", {}).get("name", ""),
+                    "type":    ev.get("type",   ""),
+                    "detail":  ev.get("detail", ""),
+                    "elapsed": ev_time.get("elapsed", ""),
+                    "extra":   ev_time.get("extra"),
+                })
+            await cache.set(cache_key, events, ttl=CACHE_TTL.get("football_live", 60))
+            return events
+        return {"error": True}
+
 
 omega_football = OmegaFootball()

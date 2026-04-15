@@ -4865,6 +4865,30 @@ class OmegaFootball:
             return stale["data"]
         return {"error": True}
 
+    async def get_events(self, fixture_id: int) -> list | dict:
+        """Fetch match events: goals, cards, substitutions."""
+        cache_key = f"apifb:events:{fixture_id}"
+        cached = await cache.get(cache_key)
+        if cached is not None:
+            return cached
+        data = await self._get("/fixtures/events", {"fixture": fixture_id})
+        if data and "response" in data:
+            events = []
+            for ev in data["response"]:
+                ev_time = ev.get("time", {})
+                events.append({
+                    "team":    ev.get("team",   {}).get("name", ""),
+                    "player":  ev.get("player", {}).get("name", ""),
+                    "assist":  ev.get("assist", {}).get("name", ""),
+                    "type":    ev.get("type",   ""),
+                    "detail":  ev.get("detail", ""),
+                    "elapsed": ev_time.get("elapsed", ""),
+                    "extra":   ev_time.get("extra"),
+                })
+            await cache.set(cache_key, events, ttl=CACHE_TTL.get("football_live", 60))
+            return events
+        return {"error": True}
+
 
 omega_football = OmegaFootball()
 '''
@@ -6682,6 +6706,52 @@ def _card(f: dict) -> str:
     )
 
 
+def _card_kb(f: dict) -> InlineKeyboardMarkup | None:
+    """Show events button only for started/finished matches."""
+    fid = f.get("fixture_id")
+    if fid and f.get("status") not in ("NS", "TBD"):
+        return InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="📋 أحداث المباراة", callback_data=f"fb_ev:{fid}")
+        ]])
+    return None
+
+
+def _fmt_events(events: list) -> str:
+    """Format match events into a readable card."""
+    if not events:
+        return "لا توجد أحداث مسجلة بعد"
+    lines: list[str] = []
+    for ev in events:
+        ev_type = ev.get("type", "")
+        detail  = ev.get("detail", "")
+        elapsed = ev.get("elapsed", "?")
+        extra   = ev.get("extra")
+        player  = ev.get("player", "")
+        team    = ev.get("team", "")
+        time_str = f"`{elapsed}+{extra}'`" if extra else f"`{elapsed}'`"
+
+        if ev_type == "Goal":
+            if "Own Goal" in detail:
+                icon = "🔙"
+            elif "Penalty" in detail:
+                icon = "🎯"
+            else:
+                icon = "⚽"
+        elif ev_type == "Card":
+            icon = "🟥" if "Red" in detail else "🟨"
+        elif ev_type in ("subst", "Subst"):
+            icon = "🔄"
+        else:
+            icon = "📌"
+
+        line = f"  {icon} {time_str} *{player}*"
+        if team:
+            line += f"  _{team}_"
+        lines.append(line)
+
+    return "📋 *أحداث المباراة*\n\n" + "\n".join(lines)
+
+
 def _league_kb() -> InlineKeyboardMarkup:
     btns = [
         InlineKeyboardButton(text=info["name_ar"], callback_data=f"fb:{code}")
@@ -6715,7 +6785,8 @@ async def _send_fixtures(target, league_code: str, lang: str) -> None:
         await send(t("fb_no_live", lang))
         return
     for f in selection[:8]:
-        await send(_card(f), parse_mode="Markdown")
+        kb = _card_kb(f)
+        await send(_card(f), parse_mode="Markdown", reply_markup=kb)
 
 
 async def _send_live(target, lang: str) -> None:
@@ -6728,7 +6799,8 @@ async def _send_live(target, lang: str) -> None:
         await send(t("fb_no_live", lang))
         return
     for f in data[:8]:
-        await send(_card(f), parse_mode="Markdown")
+        kb = _card_kb(f)
+        await send(_card(f), parse_mode="Markdown", reply_markup=kb)
 
 
 @router.message(Command("football"))
@@ -6755,6 +6827,21 @@ async def handle_fb_cb(callback: CallbackQuery, lang: str = "en") -> None:
         await _send_live(callback, lang)
     elif action.upper() in MAJOR_LEAGUES:
         await _send_fixtures(callback, action.upper(), lang)
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("fb_ev:"))
+async def handle_fb_events_cb(callback: CallbackQuery, lang: str = "en") -> None:
+    await callback.answer()
+    try:
+        fixture_id = int(callback.data.split(":")[1])
+    except (IndexError, ValueError):
+        return
+    events = await omega_football.get_events(fixture_id)
+    if isinstance(events, dict) and events.get("error"):
+        await callback.message.answer(t("error", lang))
+        return
+    text = _fmt_events(events if isinstance(events, list) else [])
+    await callback.message.answer(text, parse_mode="Markdown")
 
 
 def register_football_handlers(dp) -> None:
