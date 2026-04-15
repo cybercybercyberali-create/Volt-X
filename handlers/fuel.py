@@ -15,6 +15,35 @@ router = Router(name="fuel")
 # Valid range check: if scraped value is outside 80,000–150,000 it's rejected.
 _FALLBACK_RATE = 89500.0  # LBP per 1 USD — BDL official (Feb 2023 onwards)
 
+# Canonical Arabic names for the 4 fuel types shown on the card
+_FUEL_KEYS = {
+    "98":                                              "بنزين 98",
+    "95":                                              "بنزين 95",
+    "diesel|ديزل|مازوت|mazout|gasoil|gas oil":         "ديزل",
+    "gas|غاز|lpg|butane|gaz":                          "غاز 10kg",
+}
+
+
+def _normalize_fuel_keys(prices: dict) -> dict:
+    """Map any scraped key names to standard Arabic canonical names."""
+    out: dict = {}
+    for raw_key, val in prices.items():
+        kl = raw_key.lower()
+        matched = False
+        for patterns_str, canonical in _FUEL_KEYS.items():
+            if canonical in out:          # already set by a better match
+                continue
+            for p in patterns_str.split("|"):
+                if p in kl or p in raw_key:
+                    out[canonical] = val
+                    matched = True
+                    break
+            if matched:
+                break
+        if not matched:
+            out[raw_key] = val            # keep as-is if no mapping found
+    return out
+
 
 async def _fetch_exchange_rate() -> float:
     """Fetch live USD→LBP rate. Tries 3 sources in order, falls back to BDL official."""
@@ -92,37 +121,42 @@ async def cmd_fuel(message: Message, lang: str = "en") -> None:
         # ── Lebanon: render the rich visual card ──────────────────────────────
         if country == "LB":
             prices_raw = data.get("prices", {}) if not data.get("error") else {}
-            # Keep only LBP-formatted prices (must contain ل.ل or LL or LBP)
-            prices_real = {
+
+            # Fetch LBP/USD rate early (needed for GPP conversion below)
+            rate = await _fetch_exchange_rate()
+
+            source_label = "IPT Group"
+            ago = "—"
+
+            # Keep LBP-formatted prices (contain ل.ل / LL / LBP), then normalize keys
+            lbp_prices = {
                 k: v for k, v in prices_raw.items()
                 if k != "note"
                 and any(c.isdigit() for c in str(v))
                 and any(m in str(v) for m in ("ل.ل", "LL", "LBP", "لل"))
             }
+            prices_real = _normalize_fuel_keys(lbp_prices)
 
-            # Fetch LBP/USD rate
-            rate = await _fetch_exchange_rate()
-
-            source_label = "IPT Group"
-            ago = "—"
             if not prices_real:
-                # Fallback: GlobalPetrolPrices USD prices → convert to LBP for display
+                # Try GPP USD prices → convert to LBP with canonical Arabic names
                 gpp_prices = {k: v for k, v in prices_raw.items()
-                              if k != "note" and "USD" in str(v) and any(c.isdigit() for c in str(v))}
+                              if k != "note" and "USD" in str(v)
+                              and any(c.isdigit() for c in str(v))}
                 if gpp_prices and rate:
                     import re as _re
-                    converted = {}
+                    raw_converted = {}
                     for fuel_name, usd_str in gpp_prices.items():
                         m = _re.search(r"([\d.]+)", usd_str)
                         if m:
                             usd_per_l = float(m.group(1))
-                            llp = int(usd_per_l * rate)
                             llp_20l = int(usd_per_l * rate * 20)
-                            converted[fuel_name] = f"{llp_20l:,} ل.ل."
-                    if converted:
-                        prices_real = converted
+                            raw_converted[fuel_name] = f"{llp_20l:,} ل.ل."
+                    prices_real = _normalize_fuel_keys(raw_converted)
+                    if prices_real:
                         source_label = "GlobalPetrolPrices"
-                # Fallback: last verified IPT Group weekly prices
+
+            if not prices_real:
+                # Static fallback: last verified IPT Group weekly prices
                 prices_real = {
                     "بنزين 98": "2,460,000 ل.ل.",
                     "بنزين 95": "2,376,000 ل.ل.",

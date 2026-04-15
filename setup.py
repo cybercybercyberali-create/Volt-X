@@ -3110,18 +3110,37 @@ def fuel_card(
                 pass
         return None
 
+    def _fmt_llp(val_str: str) -> str:
+        """Return clean LBP string from raw value like '2,460,000 ل.ل.'"""
+        v = _parse_llp(val_str)
+        if v:
+            return f"{v:,.0f} ل.ل."
+        return str(val_str)
+
     def _usd_20l(llp_price: float) -> str:
         if rate and rate > 0:
             usd = llp_price / rate
-            usd_l = usd / 20
-            return f"{usd:.2f}$ / 20L  →  {usd_l:.2f}$ / L"
-        return "N/A"
+            return f"≈ ${usd:.2f} / 20L"
+        return ""
 
     def _usd_10kg(llp_price: float) -> str:
         if rate and rate > 0:
             usd = llp_price / rate
-            return f"{usd:.2f}$"
-        return "N/A"
+            return f"≈ ${usd:.2f}"
+        return ""
+
+    def _fuel_line(emoji: str, label_ar: str, label_en: str,
+                   key_ar: str, key_en: str, is_20l: bool) -> str:
+        """Build one fuel price line, always showing LBP value."""
+        val_str = (prices_llp.get(key_ar)
+                   or next((v for k, v in prices_llp.items()
+                            if key_en.lower() in k.lower() or key_ar in k), None))
+        if val_str:
+            v = _parse_llp(str(val_str))
+            llp_display = _fmt_llp(str(val_str))
+            usd_display = (_usd_20l(v) if is_20l else _usd_10kg(v)) if v else ""
+            return f"• {emoji} {label_en if lang != 'ar' else label_ar}:  {llp_display}  {usd_display}".rstrip()
+        return f"• {emoji} {label_en if lang != 'ar' else label_ar}:  {'غير متاح' if lang == 'ar' else 'N/A'}"
 
     today = datetime.now().strftime("%Y-%m-%d")
 
@@ -3130,54 +3149,22 @@ def fuel_card(
         date_line = f"📅 {today}"
         rate_line = f"💱 سعر الصرف: 1$ = {rate:,.0f} ل.ل." if rate else "💱 سعر الصرف: غير متاح"
         footer = f"🔄 منذ {ago} | {source}"
-
         lines = [title, date_line, ""]
-
-        # Benzin 98
-        key98 = next((k for k in prices_llp if "98" in k), None)
-        val98 = _parse_llp(prices_llp[key98]) if key98 else None
-        lines.append(f"• 🔵 بنزين 98:  {_usd_20l(val98) if val98 else 'غير متاح'}")
-
-        # Benzin 95
-        key95 = next((k for k in prices_llp if "95" in k), None)
-        val95 = _parse_llp(prices_llp[key95]) if key95 else None
-        lines.append(f"• 🔵 بنزين 95:  {_usd_20l(val95) if val95 else 'غير متاح'}")
-
-        # Diesel
-        keyd = next((k for k in prices_llp if "ديزل" in k or "diesel" in k.lower() or "مازوت" in k), None)
-        vald = _parse_llp(prices_llp[keyd]) if keyd else None
-        lines.append(f"• ⚫ ديزل:      {_usd_20l(vald) if vald else 'غير متاح'}")
-
-        # Gas 10kg
-        keyg = next((k for k in prices_llp if "غاز" in k or "gas" in k.lower()), None)
-        valg = _parse_llp(prices_llp[keyg]) if keyg else None
-        lines.append(f"• 🟠 غاز (10kg): {_usd_10kg(valg) if valg else 'غير متاح'}")
-
+        lines.append(_fuel_line("🔵", "بنزين 98", "Benzin 98", "بنزين 98", "98", True))
+        lines.append(_fuel_line("🔵", "بنزين 95", "Benzin 95", "بنزين 95", "95", True))
+        lines.append(_fuel_line("⚫", "ديزل",     "Diesel",    "ديزل",     "diesel", True))
+        lines.append(_fuel_line("🟠", "غاز (10kg)", "Gas (10kg)", "غاز 10kg", "gas", False))
         lines.extend(["", rate_line, footer])
     else:
         title = "⛽ *Lebanon Fuel Prices* 🇱🇧"
         date_line = f"📅 {today}"
         rate_line = f"💱 Exchange Rate: 1$ = {rate:,.0f} LBP" if rate else "💱 Exchange Rate: unavailable"
         footer = f"🔄 {ago} ago | {source}"
-
         lines = [title, date_line, ""]
-
-        key98 = next((k for k in prices_llp if "98" in k), None)
-        val98 = _parse_llp(prices_llp[key98]) if key98 else None
-        lines.append(f"• 🔵 Benzin 98:  {_usd_20l(val98) if val98 else 'N/A'}")
-
-        key95 = next((k for k in prices_llp if "95" in k), None)
-        val95 = _parse_llp(prices_llp[key95]) if key95 else None
-        lines.append(f"• 🔵 Benzin 95:  {_usd_20l(val95) if val95 else 'N/A'}")
-
-        keyd = next((k for k in prices_llp if "ديزل" in k or "diesel" in k.lower() or "مازوت" in k), None)
-        vald = _parse_llp(prices_llp[keyd]) if keyd else None
-        lines.append(f"• ⚫ Diesel:      {_usd_20l(vald) if vald else 'N/A'}")
-
-        keyg = next((k for k in prices_llp if "غاز" in k or "gas" in k.lower()), None)
-        valg = _parse_llp(prices_llp[keyg]) if keyg else None
-        lines.append(f"• 🟠 Gas (10kg):  {_usd_10kg(valg) if valg else 'N/A'}")
-
+        lines.append(_fuel_line("🔵", "بنزين 98", "Benzin 98", "بنزين 98", "98", True))
+        lines.append(_fuel_line("🔵", "بنزين 95", "Benzin 95", "بنزين 95", "95", True))
+        lines.append(_fuel_line("⚫", "ديزل",     "Diesel",    "ديزل",     "diesel", True))
+        lines.append(_fuel_line("🟠", "غاز (10kg)", "Gas (10kg)", "غاز 10kg", "gas", False))
         lines.extend(["", rate_line, footer])
 
     return "\n".join(lines)
@@ -6740,6 +6727,35 @@ router = Router(name="fuel")
 # Valid range check: if scraped value is outside 80,000–150,000 it's rejected.
 _FALLBACK_RATE = 89500.0  # LBP per 1 USD — BDL official (Feb 2023 onwards)
 
+# Canonical Arabic names for the 4 fuel types shown on the card
+_FUEL_KEYS = {
+    "98":                                              "بنزين 98",
+    "95":                                              "بنزين 95",
+    "diesel|ديزل|مازوت|mazout|gasoil|gas oil":         "ديزل",
+    "gas|غاز|lpg|butane|gaz":                          "غاز 10kg",
+}
+
+
+def _normalize_fuel_keys(prices: dict) -> dict:
+    """Map any scraped key names to standard Arabic canonical names."""
+    out: dict = {}
+    for raw_key, val in prices.items():
+        kl = raw_key.lower()
+        matched = False
+        for patterns_str, canonical in _FUEL_KEYS.items():
+            if canonical in out:
+                continue
+            for p in patterns_str.split("|"):
+                if p in kl or p in raw_key:
+                    out[canonical] = val
+                    matched = True
+                    break
+            if matched:
+                break
+        if not matched:
+            out[raw_key] = val
+    return out
+
 
 async def _fetch_exchange_rate() -> float:
     """Fetch live USD→LBP rate. Tries 3 sources in order, falls back to BDL official."""
@@ -6817,37 +6833,42 @@ async def cmd_fuel(message: Message, lang: str = "en") -> None:
         # ── Lebanon: render the rich visual card ──────────────────────────────
         if country == "LB":
             prices_raw = data.get("prices", {}) if not data.get("error") else {}
-            # Keep only LBP-formatted prices (must contain ل.ل or LL or LBP)
-            prices_real = {
+
+            # Fetch LBP/USD rate early (needed for GPP conversion below)
+            rate = await _fetch_exchange_rate()
+
+            source_label = "IPT Group"
+            ago = "—"
+
+            # Keep LBP-formatted prices (contain ل.ل / LL / LBP), then normalize keys
+            lbp_prices = {
                 k: v for k, v in prices_raw.items()
                 if k != "note"
                 and any(c.isdigit() for c in str(v))
                 and any(m in str(v) for m in ("ل.ل", "LL", "LBP", "لل"))
             }
+            prices_real = _normalize_fuel_keys(lbp_prices)
 
-            # Fetch LBP/USD rate
-            rate = await _fetch_exchange_rate()
-
-            source_label = "IPT Group"
-            ago = "—"
             if not prices_real:
-                # Fallback: GlobalPetrolPrices USD prices → convert to LBP for display
+                # Try GPP USD prices → convert to LBP with canonical Arabic names
                 gpp_prices = {k: v for k, v in prices_raw.items()
-                              if k != "note" and "USD" in str(v) and any(c.isdigit() for c in str(v))}
+                              if k != "note" and "USD" in str(v)
+                              and any(c.isdigit() for c in str(v))}
                 if gpp_prices and rate:
                     import re as _re
-                    converted = {}
+                    raw_converted = {}
                     for fuel_name, usd_str in gpp_prices.items():
                         m = _re.search(r"([\d.]+)", usd_str)
                         if m:
                             usd_per_l = float(m.group(1))
-                            llp = int(usd_per_l * rate)
                             llp_20l = int(usd_per_l * rate * 20)
-                            converted[fuel_name] = f"{llp_20l:,} ل.ل."
-                    if converted:
-                        prices_real = converted
+                            raw_converted[fuel_name] = f"{llp_20l:,} ل.ل."
+                    prices_real = _normalize_fuel_keys(raw_converted)
+                    if prices_real:
                         source_label = "GlobalPetrolPrices"
-                # Fallback: last verified IPT Group weekly prices
+
+            if not prices_real:
+                # Static fallback: last verified IPT Group weekly prices
                 prices_real = {
                     "بنزين 98": "2,460,000 ل.ل.",
                     "بنزين 95": "2,376,000 ل.ل.",
