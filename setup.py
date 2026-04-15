@@ -5823,15 +5823,15 @@ _KB_AR = [
     ["⛽ محروقات",  "🌤 طقس",      "🥇 ذهب"],
     ["💱 عملة",     "₿ كريبتو",   "📈 أسهم"],
     ["📰 أخبار",   "⚽ كرة قدم",  "🎬 أفلام"],
-    ["🤖 ذكاء اصطناعي", "🎨 شعار", "📄 CV"],
-    ["✈️ رحلات",   "🌍 زلازل",   "⚙️ إعدادات"],
+    ["🤖 ذكاء اصطناعي", "✈️ رحلات", "🌍 زلازل"],
+    ["⚙️ إعدادات"],
 ]
 _KB_EN = [
     ["⛽ Fuel",     "🌤 Weather",  "🥇 Gold"],
     ["💱 Currency", "₿ Crypto",   "📈 Stocks"],
     ["📰 News",     "⚽ Football", "🎬 Movies"],
-    ["🤖 AI Chat",  "🎨 Logo",    "📄 CV"],
-    ["✈️ Flights",  "🌍 Quakes",  "⚙️ Settings"],
+    ["🤖 AI Chat",  "✈️ Flights",  "🌍 Quakes"],
+    ["⚙️ Settings"],
 ]
 
 # Flat lookup: button text → internal key (for routing)
@@ -5857,8 +5857,6 @@ _BTN_MAP.update({
     "⚽ كرة قدم": "football","⚽ Football": "football",
     "🎬 أفلام": "movies",    "🎬 Movies": "movies",
     "🤖 ذكاء اصطناعي": "ai","🤖 AI Chat": "ai",
-    "🎨 شعار": "logo",       "🎨 Logo": "logo",
-    "📄 CV": "cv",
     "✈️ رحلات": "flights",  "✈️ Flights": "flights",
     "🌍 زلازل": "quakes",   "🌍 Quakes": "quakes",
     "⚙️ إعدادات": "settings","⚙️ Settings": "settings",
@@ -5907,9 +5905,6 @@ async def _dispatch_key(message: Message, key: str, lang: str) -> None:
             from handlers.movies import cmd_movie
             await cmd_movie(message, lang=lang)
         elif key == "ai":
-            hint = "🤖 اكتب سؤالك مباشرةً!" if lang == "ar" else "🤖 Just type your question!"
-            await message.answer(hint)
-        elif key in ("logo", "cv"):
             hint = "🤖 اكتب سؤالك مباشرةً!" if lang == "ar" else "🤖 Just type your question!"
             await message.answer(hint)
         elif key == "flights":
