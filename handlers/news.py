@@ -75,7 +75,16 @@ async def cmd_news(message: Message, lang: str = "en") -> None:
             await message.answer(t("not_found", lang))
             return
 
-        for article in data["articles"][:5]:
+        articles = data["articles"][:5]
+        window   = data.get("window_hours")
+
+        # Header note when we widened the search window to 72 h
+        if window == 72 and query:
+            note = f"⏱ _لم أجد نتائج للـ 24 ساعة الماضية — عرض آخر 72 ساعة_" if lang == "ar" \
+                else f"⏱ _No results in last 24h — showing last 72h_"
+            await message.answer(note, parse_mode="Markdown")
+
+        for article in articles:
             card = _card(article, lang)
             if not card.strip():
                 continue

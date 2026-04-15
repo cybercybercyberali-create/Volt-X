@@ -44,36 +44,60 @@ class OmegaNews:
         return result or {"articles": [], "error": True}
 
     async def search_news(self, query: str, lang: str = "en") -> dict[str, Any]:
-        """Search news by keyword."""
+        """Search news by keyword — prefers last 24h, falls back to 72h."""
         cache_key = f"news:search:{query}:{lang}"
         cached = await cache.get(cache_key)
         if cached:
             return cached
 
-        try:
-            if settings.newsapi_key:
-                data = await self._newsapi.get(
-                    "/everything",
-                    params={"apiKey": settings.newsapi_key, "q": query, "language": lang, "pageSize": 10, "sortBy": "publishedAt"},
-                )
-                if data and data.get("status") == "ok":
-                    articles = self._parse_newsapi_articles(data.get("articles", []))
-                    result = {"articles": articles, "query": query, "error": False}
-                    await cache.set(cache_key, result, ttl=CACHE_TTL["news"])
-                    return result
-        except Exception as exc:
-            logger.debug(f"NewsAPI search error: {exc}")
+        from datetime import datetime, timedelta, timezone
+        now = datetime.now(timezone.utc)
+
+        if settings.newsapi_key:
+            # Try 24h window first, widen to 72h if empty
+            for hours in (24, 72):
+                from_dt = (now - timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
+                try:
+                    data = await self._newsapi.get(
+                        "/everything",
+                        params={
+                            "apiKey": settings.newsapi_key,
+                            "q": query,
+                            "language": lang,
+                            "pageSize": 10,
+                            "sortBy": "publishedAt",
+                            "from": from_dt,
+                        },
+                    )
+                    if data and data.get("status") == "ok":
+                        articles = self._parse_newsapi_articles(data.get("articles", []))
+                        if articles or hours == 72:
+                            result = {"articles": articles, "query": query,
+                                      "error": False, "window_hours": hours}
+                            await cache.set(cache_key, result, ttl=CACHE_TTL["news"])
+                            return result
+                except Exception as exc:
+                    logger.debug(f"NewsAPI search error ({hours}h): {exc}")
+                    break
 
         return {"articles": [], "error": True}
 
     async def _fetch_newsapi(self, category: str, country: str) -> Optional[dict]:
-        """Fetch from NewsAPI."""
+        """Fetch from NewsAPI — top headlines within the last 24 h."""
         if not settings.newsapi_key:
             return None
+        from datetime import datetime, timedelta, timezone
+        from_dt = (datetime.now(timezone.utc) - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%SZ")
         try:
             data = await self._newsapi.get(
                 "/top-headlines",
-                params={"apiKey": settings.newsapi_key, "category": category, "country": country, "pageSize": 20},
+                params={
+                    "apiKey": settings.newsapi_key,
+                    "category": category,
+                    "country": country,
+                    "pageSize": 20,
+                    "from": from_dt,
+                },
             )
             if data and data.get("status") == "ok":
                 articles = self._parse_newsapi_articles(data.get("articles", []))
