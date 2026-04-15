@@ -66,7 +66,11 @@ async def _send_card(msg: Message, item: dict, lang: str) -> None:
 
 @router.message(Command("movie"))
 async def cmd_movie(message: Message, lang: str = "en") -> None:
-    raw = message.text.replace("/movie", "", 1).strip() if message.text else ""
+    raw = message.text or ""
+    for prefix in ("/movie", "🎬 أفلام", "🎬 Movies", "🎬"):
+        if raw.lower().startswith(prefix.lower()):
+            raw = raw[len(prefix):].strip()
+            break
 
     if not raw:
         data = await omega_movies.get_trending()

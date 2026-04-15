@@ -6736,6 +6736,14 @@ _FUEL_KEYS = {
 }
 
 
+_CANONICAL_LB_KEYS = {"بنزين 98", "بنزين 95", "ديزل", "غاز 10kg"}
+
+
+def _has_canonical_prices(d: dict) -> bool:
+    """Return True only when at least 2 canonical Lebanon fuel keys are present."""
+    return sum(1 for k in d if k in _CANONICAL_LB_KEYS) >= 2
+
+
 def _normalize_fuel_keys(prices: dict) -> dict:
     """Map any scraped key names to standard Arabic canonical names."""
     out: dict = {}
@@ -6849,7 +6857,7 @@ async def cmd_fuel(message: Message, lang: str = "en") -> None:
             }
             prices_real = _normalize_fuel_keys(lbp_prices)
 
-            if not prices_real:
+            if not _has_canonical_prices(prices_real):
                 # Try GPP USD prices → convert to LBP with canonical Arabic names
                 gpp_prices = {k: v for k, v in prices_raw.items()
                               if k != "note" and "USD" in str(v)
@@ -6863,11 +6871,12 @@ async def cmd_fuel(message: Message, lang: str = "en") -> None:
                             usd_per_l = float(m.group(1))
                             llp_20l = int(usd_per_l * rate * 20)
                             raw_converted[fuel_name] = f"{llp_20l:,} ل.ل."
-                    prices_real = _normalize_fuel_keys(raw_converted)
-                    if prices_real:
+                    converted = _normalize_fuel_keys(raw_converted)
+                    if _has_canonical_prices(converted):
+                        prices_real = converted
                         source_label = "GlobalPetrolPrices"
 
-            if not prices_real:
+            if not _has_canonical_prices(prices_real):
                 # Static fallback: last verified IPT Group weekly prices
                 prices_real = {
                     "بنزين 98": "2,460,000 ل.ل.",
@@ -7230,7 +7239,11 @@ async def _send_card(msg: Message, item: dict, lang: str) -> None:
 
 @router.message(Command("movie"))
 async def cmd_movie(message: Message, lang: str = "en") -> None:
-    raw = message.text.replace("/movie", "", 1).strip() if message.text else ""
+    raw = message.text or ""
+    for prefix in ("/movie", "🎬 أفلام", "🎬 Movies", "🎬"):
+        if raw.lower().startswith(prefix.lower()):
+            raw = raw[len(prefix):].strip()
+            break
 
     if not raw:
         data = await omega_movies.get_trending()
@@ -7760,7 +7773,12 @@ router = Router(name="crypto")
 
 @router.message(Command("crypto"))
 async def cmd_crypto(message: Message, lang: str = "en") -> None:
-    coin = message.text.replace("/crypto", "").strip().lower() if message.text else ""
+    raw = message.text or ""
+    for prefix in ("/crypto", "₿ كريبتو", "₿ Crypto", "₿"):
+        if raw.lower().startswith(prefix.lower()):
+            raw = raw[len(prefix):].strip()
+            break
+    coin = raw.lower()
     if not coin:
         # Show top 10 as a compact list card
         data = await omega_crypto.get_top_coins(10)

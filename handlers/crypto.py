@@ -13,7 +13,12 @@ router = Router(name="crypto")
 
 @router.message(Command("crypto"))
 async def cmd_crypto(message: Message, lang: str = "en") -> None:
-    coin = message.text.replace("/crypto", "").strip().lower() if message.text else ""
+    raw = message.text or ""
+    for prefix in ("/crypto", "₿ كريبتو", "₿ Crypto", "₿"):
+        if raw.lower().startswith(prefix.lower()):
+            raw = raw[len(prefix):].strip()
+            break
+    coin = raw.lower()
     if not coin:
         # Show top 10 as a compact list card
         data = await omega_crypto.get_top_coins(10)
