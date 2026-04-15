@@ -406,16 +406,16 @@ I18N = {
     },
     # ━━━ Sub-keys: Gold ━━━
     "gold_price": {
-        "ar": "🪙 **سعر الذهب**\n\n💰 الأونصة: ${price}",
-        "en": "🪙 **Gold Price**\n\n💰 Ounce: ${price}",
-        "fr": "🪙 **Prix de l'or**\n\n💰 Once: ${price}",
-        "es": "🪙 **Precio del oro**\n\n💰 Onza: ${price}",
-        "tr": "🪙 **Altın Fiyatı**\n\n💰 Ons: ${price}",
-        "ru": "🪙 **Цена золота**\n\n💰 Унция: ${price}",
-        "fa": "🪙 **قیمت طلا**\n\n💰 اونس: ${price}",
-        "de": "🪙 **Goldpreis**\n\n💰 Unze: ${price}",
-        "hi": "🪙 **सोने की कीमत**\n\n💰 औंस: ${price}",
-        "zh-CN": "🪙 **黄金价格**\n\n💰 盎司: ${price}",
+        "ar": "🪙 *سعر الذهب*\n\n💰 الأونصة: ${price}",
+        "en": "🪙 *Gold Price*\n\n💰 Ounce: ${price}",
+        "fr": "🪙 *Prix de l'or*\n\n💰 Once: ${price}",
+        "es": "🪙 *Precio del oro*\n\n💰 Onza: ${price}",
+        "tr": "🪙 *Altın Fiyatı*\n\n💰 Ons: ${price}",
+        "ru": "🪙 *Цена золота*\n\n💰 Унция: ${price}",
+        "fa": "🪙 *قیمت طلا*\n\n💰 اونس: ${price}",
+        "de": "🪙 *Goldpreis*\n\n💰 Unze: ${price}",
+        "hi": "🪙 *सोने की कीमत*\n\n💰 औंस: ${price}",
+        "zh-CN": "🪙 *黄金价格*\n\n💰 盎司: ${price}",
     },
     "gold_karats_btn": {
         "ar": "💍 أسعار العيارات", "en": "💍 Karat Prices", "fr": "💍 Prix des carats",
@@ -423,16 +423,16 @@ I18N = {
         "fa": "💍 قیمت عیارها", "de": "💍 Karatpreise", "hi": "💍 कैरट मूल्य", "zh-CN": "💍 克拉价格",
     },
     "gold_karats_title": {
-        "ar": "💍 **أسعار عيارات الذهب (لكل غرام)**",
-        "en": "💍 **Gold Karat Prices (per gram)**",
-        "fr": "💍 **Prix des carats d'or (par gramme)**",
-        "es": "💍 **Precios por quilate de oro (por gramo)**",
-        "tr": "💍 **Altın Ayar Fiyatları (gram başına)**",
-        "ru": "💍 **Цены по каратам золота (за грамм)**",
-        "fa": "💍 **قیمت عیارهای طلا (هر گرم)**",
-        "de": "💍 **Goldpreise nach Karat (pro Gramm)**",
-        "hi": "💍 **सोने के कैरट मूल्य (प्रति ग्राम)**",
-        "zh-CN": "💍 **黄金克拉价格（每克）**",
+        "ar": "💍 *أسعار عيارات الذهب (لكل غرام)*",
+        "en": "💍 *Gold Karat Prices (per gram)*",
+        "fr": "💍 *Prix des carats d'or (par gramme)*",
+        "es": "💍 *Precios por quilate de oro (por gramo)*",
+        "tr": "💍 *Altın Ayar Fiyatları (gram başına)*",
+        "ru": "💍 *Цены по каратам золота (за грамм)*",
+        "fa": "💍 *قیمت عیارهای طلا (هر گرم)*",
+        "de": "💍 *Goldpreise nach Karat (pro Gramm)*",
+        "hi": "💍 *सोने के कैरट मूल्य (प्रति ग्राम)*",
+        "zh-CN": "💍 *黄金克拉价格（每克）*",
     },
     "btn_refresh": {
         "ar": "🔄 تحديث", "en": "🔄 Refresh", "fr": "🔄 Actualiser",
@@ -451,32 +451,32 @@ I18N = {
     },
     # ━━━ Sub-keys: Currency ━━━
     "currency_rate": {
-        "ar": "💱 **{base} → {target}**\n\n💰 السعر: {rate}",
-        "en": "💱 **{base} → {target}**\n\n💰 Rate: {rate}",
-        "fr": "💱 **{base} → {target}**\n\n💰 Taux: {rate}",
-        "es": "💱 **{base} → {target}**\n\n💰 Tasa: {rate}",
-        "tr": "💱 **{base} → {target}**\n\n💰 Kur: {rate}",
-        "ru": "💱 **{base} → {target}**\n\n💰 Курс: {rate}",
+        "ar": "💱 *{base} → {target}*\n\n💰 السعر: {rate}",
+        "en": "💱 *{base} → {target}*\n\n💰 Rate: {rate}",
+        "fr": "💱 *{base} → {target}*\n\n💰 Taux: {rate}",
+        "es": "💱 *{base} → {target}*\n\n💰 Tasa: {rate}",
+        "tr": "💱 *{base} → {target}*\n\n💰 Kur: {rate}",
+        "ru": "💱 *{base} → {target}*\n\n💰 Курс: {rate}",
     },
     "currency_parallel": {
-        "ar": "⚠️ **السعر الموازي:** {rate}", "en": "⚠️ **Parallel rate:** {rate}",
-        "fr": "⚠️ **Taux parallèle:** {rate}", "es": "⚠️ **Tasa paralela:** {rate}",
-        "tr": "⚠️ **Paralel kur:** {rate}", "ru": "⚠️ **Параллельный курс:** {rate}",
+        "ar": "⚠️ *السعر الموازي:* {rate}", "en": "⚠️ *Parallel rate:* {rate}",
+        "fr": "⚠️ *Taux parallèle:* {rate}", "es": "⚠️ *Tasa paralela:* {rate}",
+        "tr": "⚠️ *Paralel kur:* {rate}", "ru": "⚠️ *Параллельный курс:* {rate}",
     },
     # ━━━ Sub-keys: Weather ━━━
     "weather_result": {
-        "ar": "🌤 **الطقس في {city}**\n\n🌡 الحرارة: {temp}°C\n🤔 الإحساس: {feels}°C\n💧 الرطوبة: {humidity}%\n💨 الرياح: {wind} km/h\n📝 {desc}",
-        "en": "🌤 **Weather in {city}**\n\n🌡 Temp: {temp}°C\n🤔 Feels: {feels}°C\n💧 Humidity: {humidity}%\n💨 Wind: {wind} km/h\n📝 {desc}",
-        "fr": "🌤 **Météo à {city}**\n\n🌡 Temp: {temp}°C\n💧 Humidité: {humidity}%\n💨 Vent: {wind} km/h\n📝 {desc}",
-        "es": "🌤 **Clima en {city}**\n\n🌡 Temp: {temp}°C\n💧 Humedad: {humidity}%\n💨 Viento: {wind} km/h\n📝 {desc}",
-        "tr": "🌤 **{city} Hava Durumu**\n\n🌡 Sıcaklık: {temp}°C\n💧 Nem: {humidity}%\n💨 Rüzgar: {wind} km/h\n📝 {desc}",
-        "ru": "🌤 **Погода в {city}**\n\n🌡 Темп: {temp}°C\n💧 Влажность: {humidity}%\n💨 Ветер: {wind} км/ч\n📝 {desc}",
+        "ar": "🌤 *الطقس في {city}*\n\n🌡 الحرارة: {temp}°C\n🤔 الإحساس: {feels}°C\n💧 الرطوبة: {humidity}%\n💨 الرياح: {wind} km/h\n📝 {desc}",
+        "en": "🌤 *Weather in {city}*\n\n🌡 Temp: {temp}°C\n🤔 Feels: {feels}°C\n💧 Humidity: {humidity}%\n💨 Wind: {wind} km/h\n📝 {desc}",
+        "fr": "🌤 *Météo à {city}*\n\n🌡 Temp: {temp}°C\n💧 Humidité: {humidity}%\n💨 Vent: {wind} km/h\n📝 {desc}",
+        "es": "🌤 *Clima en {city}*\n\n🌡 Temp: {temp}°C\n💧 Humedad: {humidity}%\n💨 Viento: {wind} km/h\n📝 {desc}",
+        "tr": "🌤 *{city} Hava Durumu*\n\n🌡 Sıcaklık: {temp}°C\n💧 Nem: {humidity}%\n💨 Rüzgar: {wind} km/h\n📝 {desc}",
+        "ru": "🌤 *Погода в {city}*\n\n🌡 Темп: {temp}°C\n💧 Влажность: {humidity}%\n💨 Ветер: {wind} км/ч\n📝 {desc}",
     },
     # ━━━ Sub-keys: Football ━━━
     "fb_choose_league": {
-        "ar": "⚽ **اختر الدوري:**", "en": "⚽ **Choose league:**",
-        "fr": "⚽ **Choisir la ligue:**", "es": "⚽ **Elige la liga:**",
-        "tr": "⚽ **Lig seçin:**", "ru": "⚽ **Выберите лигу:**",
+        "ar": "⚽ *اختر الدوري:*", "en": "⚽ *Choose league:*",
+        "fr": "⚽ *Choisir la ligue:*", "es": "⚽ *Elige la liga:*",
+        "tr": "⚽ *Lig seçin:*", "ru": "⚽ *Выберите лигу:*",
     },
     "fb_live_btn": {
         "ar": "🔴 مباشر", "en": "🔴 Live", "fr": "🔴 En direct",
@@ -489,13 +489,13 @@ I18N = {
     },
     # ━━━ Sub-keys: Stocks ━━━
     "stock_result": {
-        "ar": "📊 **{name} ({symbol})**\n\n💰 السعر: ${price}\n{emoji} التغير: {change} ({pct}%)\n📊 الحجم: {volume}",
-        "en": "📊 **{name} ({symbol})**\n\n💰 Price: ${price}\n{emoji} Change: {change} ({pct}%)\n📊 Volume: {volume}",
+        "ar": "📊 *{name} ({symbol})*\n\n💰 السعر: ${price}\n{emoji} التغير: {change} ({pct}%)\n📊 الحجم: {volume}",
+        "en": "📊 *{name} ({symbol})*\n\n💰 Price: ${price}\n{emoji} Change: {change} ({pct}%)\n📊 Volume: {volume}",
     },
     # ━━━ Sub-keys: Crypto ━━━
     "crypto_result": {
-        "ar": "₿ **{name} ({symbol})**\n\n💰 السعر: ${price}\n{emoji} 24h: {change}%\n🏆 الترتيب: #{rank}\n📊 القيمة السوقية: ${mcap}",
-        "en": "₿ **{name} ({symbol})**\n\n💰 Price: ${price}\n{emoji} 24h: {change}%\n🏆 Rank: #{rank}\n📊 Market Cap: ${mcap}",
+        "ar": "₿ *{name} ({symbol})*\n\n💰 السعر: ${price}\n{emoji} 24h: {change}%\n🏆 الترتيب: #{rank}\n📊 القيمة السوقية: ${mcap}",
+        "en": "₿ *{name} ({symbol})*\n\n💰 Price: ${price}\n{emoji} 24h: {change}%\n🏆 Rank: #{rank}\n📊 Market Cap: ${mcap}",
     },
     # ━━━ Sub-keys: Common ━━━
     "fetching": {
@@ -517,11 +517,11 @@ I18N = {
     },
     # ━━━ Sub-keys: Start & Help ━━━
     "help_text": {
-        "ar": "🤖 **Omega Bot**\n\nالأوامر:\n/gold — ذهب\n/currency USD EUR — عملات\n/fuel LB — محروقات\n/weather London — طقس\n/football PL — كرة قدم\n/movie Inception — أفلام\n/cv — سيرة ذاتية\n/logo — شعار\n/stock AAPL — أسهم\n/crypto bitcoin — كريبتو\n/news — أخبار\n/flight LH400 — رحلات\n/quakes — زلازل\n/settings — إعدادات\n\nأو أرسل أي سؤال مباشرة!",
-        "en": "🤖 **Omega Bot**\n\nCommands:\n/gold — Gold prices\n/currency USD EUR — Exchange\n/fuel LB — Fuel prices\n/weather London — Weather\n/football PL — Football\n/movie Inception — Movies\n/cv — Generate CV\n/logo — Logo design\n/stock AAPL — Stocks\n/crypto bitcoin — Crypto\n/news — Headlines\n/flight LH400 — Flights\n/quakes — Earthquakes\n/settings — Settings\n\nOr just type any question!",
-        "fr": "🤖 **Omega Bot**\n\nCommandes:\n/gold — Or\n/currency — Devises\n/weather — Météo\n/news — Actualités\n/settings — Paramètres\n\nOu posez une question!",
-        "tr": "🤖 **Omega Bot**\n\nKomutlar:\n/gold — Altın\n/currency — Döviz\n/weather — Hava\n/news — Haberler\n/settings — Ayarlar\n\nVeya bir soru yazın!",
-        "ru": "🤖 **Omega Bot**\n\nКоманды:\n/gold — Золото\n/currency — Валюты\n/weather — Погода\n/news — Новости\n/settings — Настройки\n\nИли задайте вопрос!",
+        "ar": "🤖 *Omega Bot*\n\nالأوامر:\n/gold — ذهب\n/currency USD EUR — عملات\n/fuel LB — محروقات\n/weather London — طقس\n/football PL — كرة قدم\n/movie Inception — أفلام\n/cv — سيرة ذاتية\n/logo — شعار\n/stock AAPL — أسهم\n/crypto bitcoin — كريبتو\n/news — أخبار\n/flight LH400 — رحلات\n/quakes — زلازل\n/settings — إعدادات\n\nأو أرسل أي سؤال مباشرة!",
+        "en": "🤖 *Omega Bot*\n\nCommands:\n/gold — Gold prices\n/currency USD EUR — Exchange\n/fuel LB — Fuel prices\n/weather London — Weather\n/football PL — Football\n/movie Inception — Movies\n/cv — Generate CV\n/logo — Logo design\n/stock AAPL — Stocks\n/crypto bitcoin — Crypto\n/news — Headlines\n/flight LH400 — Flights\n/quakes — Earthquakes\n/settings — Settings\n\nOr just type any question!",
+        "fr": "🤖 *Omega Bot*\n\nCommandes:\n/gold — Or\n/currency — Devises\n/weather — Météo\n/news — Actualités\n/settings — Paramètres\n\nOu posez une question!",
+        "tr": "🤖 *Omega Bot*\n\nKomutlar:\n/gold — Altın\n/currency — Döviz\n/weather — Hava\n/news — Haberler\n/settings — Ayarlar\n\nVeya bir soru yazın!",
+        "ru": "🤖 *Omega Bot*\n\nКоманды:\n/gold — Золото\n/currency — Валюты\n/weather — Погода\n/news — Новости\n/settings — Настройки\n\nИли задайте вопрос!",
     },
     "admin_only": {
         "ar": "⛔ هذا الأمر للمشرفين فقط", "en": "⛔ Admin only",
@@ -529,18 +529,18 @@ I18N = {
     },
     # ━━━ Sub-keys: Currency detail ━━━
     "currency_rates_title": {
-        "ar": "💱 **أسعار {base}**", "en": "💱 **{base} Rates**",
-        "fr": "💱 **Taux {base}**", "tr": "💱 **{base} Kurları**", "ru": "💱 **Курсы {base}**",
+        "ar": "💱 *أسعار {base}*", "en": "💱 *{base} Rates*",
+        "fr": "💱 *Taux {base}*", "tr": "💱 *{base} Kurları*", "ru": "💱 *Курсы {base}*",
     },
     # ━━━ Sub-keys: Fuel ━━━
     "fuel_title_country": {
-        "ar": "⛽ **أسعار المحروقات — {country}**", "en": "⛽ **Fuel Prices — {country}**",
-        "fr": "⛽ **Prix carburant — {country}**", "tr": "⛽ **Yakıt — {country}**", "ru": "⛽ **Топливо — {country}**",
+        "ar": "⛽ *أسعار المحروقات — {country}*", "en": "⛽ *Fuel Prices — {country}*",
+        "fr": "⛽ *Prix carburant — {country}*", "tr": "⛽ *Yakıt — {country}*", "ru": "⛽ *Топливо — {country}*",
     },
     # ━━━ Sub-keys: Movies ━━━
     "trending_title": {
-        "ar": "🎬 **الأفلام الرائجة:**", "en": "🎬 **Trending Movies:**",
-        "fr": "🎬 **Films tendance:**", "tr": "🎬 **Trend Filmler:**", "ru": "🎬 **Популярные фильмы:**",
+        "ar": "🎬 *الأفلام الرائجة:*", "en": "🎬 *Trending Movies:*",
+        "fr": "🎬 *Films tendance:*", "tr": "🎬 *Trend Filmler:*", "ru": "🎬 *Популярные фильмы:*",
     },
     "search_hint": {
         "ar": "🔍 للبحث: /movie اسم الفيلم", "en": "🔍 Search: /movie name",
@@ -556,8 +556,8 @@ I18N = {
     },
     # ━━━ Sub-keys: News ━━━
     "news_headline": {
-        "ar": "📰 **آخر الأخبار:**", "en": "📰 **Latest News:**",
-        "fr": "📰 **Dernières nouvelles:**", "tr": "📰 **Son Haberler:**", "ru": "📰 **Последние новости:**",
+        "ar": "📰 *آخر الأخبار:*", "en": "📰 *Latest News:*",
+        "fr": "📰 *Dernières nouvelles:*", "tr": "📰 *Son Haberler:*", "ru": "📰 *Последние новости:*",
     },
     "read_more": {
         "ar": "🔗 اقرأ المزيد", "en": "🔗 Read more", "fr": "🔗 Lire la suite",
@@ -565,8 +565,8 @@ I18N = {
     },
     # ━━━ Sub-keys: Crypto ━━━
     "crypto_top_title": {
-        "ar": "₿ **العملات الرقمية:**", "en": "₿ **Cryptocurrencies:**",
-        "fr": "₿ **Cryptomonnaies:**", "tr": "₿ **Kripto Paralar:**", "ru": "₿ **Криптовалюты:**",
+        "ar": "₿ *العملات الرقمية:*", "en": "₿ *Cryptocurrencies:*",
+        "fr": "₿ *Cryptomonnaies:*", "tr": "₿ *Kripto Paralar:*", "ru": "₿ *Криптовалюты:*",
     },
     "crypto_detail_hint": {
         "ar": "🔍 للتفاصيل: /crypto bitcoin", "en": "🔍 Details: /crypto bitcoin",
@@ -586,21 +586,21 @@ I18N = {
     },
     # ━━━ Sub-keys: AI ━━━
     "ai_intro": {
-        "ar": "🤖 **مساعد AI الذكي**\n\nاكتب سؤالك بعد /ai\nأو أرسل أي رسالة مباشرة!",
-        "en": "🤖 **AI Smart Assistant**\n\nType your question after /ai\nOr just send any message!",
-        "fr": "🤖 **Assistant IA**\n\nÉcrivez après /ai\nOu envoyez un message!",
-        "tr": "🤖 **AI Asistan**\n\n/ai sonrası sorunuzu yazın\nVeya direkt mesaj gönderin!",
+        "ar": "🤖 *مساعد AI الذكي*\n\nاكتب سؤالك بعد /ai\nأو أرسل أي رسالة مباشرة!",
+        "en": "🤖 *AI Smart Assistant*\n\nType your question after /ai\nOr just send any message!",
+        "fr": "🤖 *Assistant IA*\n\nÉcrivez après /ai\nOu envoyez un message!",
+        "tr": "🤖 *AI Asistan*\n\n/ai sonrası sorunuzu yazın\nVeya direkt mesaj gönderin!",
     },
     # ━━━ Sub-keys: CV ━━━
     "cv_intro": {
-        "ar": "📄 **إنشاء سيرة ذاتية احترافية**\n\nسأطلب منك 9 معلومات.",
-        "en": "📄 **Professional CV Generator**\n\nI will ask you 9 questions.",
-        "fr": "📄 **Générateur de CV**\n\n9 questions à remplir.",
-        "tr": "📄 **Profesyonel CV Oluşturucu**\n\n9 soru soracağım.",
+        "ar": "📄 *إنشاء سيرة ذاتية احترافية*\n\nسأطلب منك 9 معلومات.",
+        "en": "📄 *Professional CV Generator*\n\nI will ask you 9 questions.",
+        "fr": "📄 *Générateur de CV*\n\n9 questions à remplir.",
+        "tr": "📄 *Profesyonel CV Oluşturucu*\n\n9 soru soracağım.",
     },
     "cv_step": {
-        "ar": "{n}️⃣ **الخطوة {n}/9:** {q}", "en": "{n}️⃣ **Step {n}/9:** {q}",
-        "fr": "{n}️⃣ **Étape {n}/9:** {q}", "tr": "{n}️⃣ **Adım {n}/9:** {q}",
+        "ar": "{n}️⃣ *الخطوة {n}/9:* {q}", "en": "{n}️⃣ *Step {n}/9:* {q}",
+        "fr": "{n}️⃣ *Étape {n}/9:* {q}", "tr": "{n}️⃣ *Adım {n}/9:* {q}",
     },
     "cv_q_name": {"ar": "ما اسمك الكامل؟", "en": "What is your full name?", "fr": "Votre nom complet?", "tr": "Tam adınız?"},
     "cv_q_email": {"ar": "ما بريدك الإلكتروني؟", "en": "Your email?", "fr": "Votre email?", "tr": "E-posta adresiniz?"},
@@ -615,10 +615,10 @@ I18N = {
     "cv_done": {"ar": "✅ سيرتك الذاتية جاهزة!", "en": "✅ Your CV is ready!", "fr": "✅ Votre CV est prêt!", "tr": "✅ CV'niz hazır!"},
     # ━━━ Sub-keys: Logo ━━━
     "logo_intro": {
-        "ar": "🎨 **مولّد الشعارات**\n\nأرسل اسم المشروع:\n/logo اسم المشروع",
-        "en": "🎨 **Logo Generator**\n\nSend project name:\n/logo ProjectName",
-        "fr": "🎨 **Générateur de logo**\n\nEnvoyez le nom:\n/logo NomProjet",
-        "tr": "🎨 **Logo Oluşturucu**\n\nProje adı gönderin:\n/logo ProjeAdı",
+        "ar": "🎨 *مولّد الشعارات*\n\nأرسل اسم المشروع:\n/logo اسم المشروع",
+        "en": "🎨 *Logo Generator*\n\nSend project name:\n/logo ProjectName",
+        "fr": "🎨 *Générateur de logo*\n\nEnvoyez le nom:\n/logo NomProjet",
+        "tr": "🎨 *Logo Oluşturucu*\n\nProje adı gönderin:\n/logo ProjeAdı",
     },
     "logo_generating": {"ar": "⏳ جاري تصميم الشعار...", "en": "⏳ Designing logo...", "fr": "⏳ Création du logo...", "tr": "⏳ Logo tasarlanıyor..."},
     # ━━━ Sub-keys: Settings ━━━
@@ -644,9 +644,9 @@ I18N = {
     "label_note": {"ar": "📝 ملاحظة", "en": "📝 Note", "fr": "📝 Note", "tr": "📝 Not", "ru": "📝 Примечание"},
     "label_parallel": {"ar": "⚠️ السعر الموازي", "en": "⚠️ Parallel rate", "fr": "⚠️ Taux parallèle", "tr": "⚠️ Paralel kur", "ru": "⚠️ Параллельный курс"},
     "fb_live_title": {
-        "ar": "🔴 **مباريات مباشرة:**", "en": "🔴 **Live Matches:**",
-        "fr": "🔴 **Matchs en direct:**", "tr": "🔴 **Canli Maclar:**",
-        "es": "🔴 **Partidos en vivo:**", "ru": "🔴 **Живые матчи:**",
+        "ar": "🔴 *مباريات مباشرة:*", "en": "🔴 *Live Matches:*",
+        "fr": "🔴 *Matchs en direct:*", "tr": "🔴 *Canli Maclar:*",
+        "es": "🔴 *Partidos en vivo:*", "ru": "🔴 *Живые матчи:*",
     },
     "label_departures": {
         "ar": "🛫 المغادرات", "en": "🛫 Departures", "fr": "🛫 Departs",
@@ -669,8 +669,8 @@ I18N = {
         "tr": "🧭 Yon", "es": "🧭 Rumbo", "ru": "🧭 Курс",
     },
     "stats_title": {
-        "ar": "📊 **إحصائيات Omega Bot**", "en": "📊 **Omega Bot Stats**",
-        "fr": "📊 **Stats Omega Bot**", "tr": "📊 **Omega Bot Istatistikler**",
+        "ar": "📊 *إحصائيات Omega Bot*", "en": "📊 *Omega Bot Stats*",
+        "fr": "📊 *Stats Omega Bot*", "tr": "📊 *Omega Bot Istatistikler*",
     },
     "stats_system": {
         "ar": "📋 النظام", "en": "📋 System", "fr": "📋 Systeme", "tr": "📋 Sistem",

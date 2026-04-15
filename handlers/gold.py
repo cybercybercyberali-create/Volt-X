@@ -43,7 +43,7 @@ async def cmd_gold(message: Message, lang: str = "en") -> None:
             karat_lines.append(karat_label)
             for k in ["24K", "22K", "21K", "18K", "14K", "9K"]:
                 if k in data["karats"]:
-                    karat_lines.append(f"  {k}: **${data['karats'][k]['per_gram']:,.2f}**")
+                    karat_lines.append(f"  {k}: *${data['karats'][k]['per_gram']:,.2f}*")
             text += "\n".join(karat_lines)
 
         buttons = InlineKeyboardMarkup(inline_keyboard=[
@@ -67,7 +67,7 @@ async def handle_metal(callback: CallbackQuery, lang: str = "en") -> None:
             await callback.message.answer(t("error", lang))
             return
         name = METAL_NAMES.get(metal, {}).get(lang, METAL_NAMES.get(metal, {}).get("en", metal))
-        text = f"🪙 **{name}**\n\n💰 ${data['price_per_ounce']:,.2f}"
+        text = f"🪙 *{name}*\n\n💰 ${data['price_per_ounce']:,.2f}"
         await callback.message.answer(text, parse_mode="Markdown")
     except Exception as exc:
         logger.error(f"Metal callback error: {exc}", exc_info=True)

@@ -195,7 +195,7 @@ async def _route_to_service(message: Message, query: str, lang: str) -> bool:
             await message.answer(t("fetching", lang))
             data = await omega_weather.get_weather(city, lang)
             if not data.get("error"):
-                text = f"🌤 **{data.get('city', city)}**\n\n"
+                text = f"🌤 *{data.get('city', city)}*\n\n"
                 text += f"🌡 {t('label_temp', lang)}: {data['temperature']}°C\n"
                 text += f"🤔 {t('label_feels', lang)}: {data.get('feels_like', 'N/A')}°C\n"
                 text += f"💧 {t('label_humidity', lang)}: {data.get('humidity', 'N/A')}%\n"
@@ -243,7 +243,7 @@ async def _route_to_service(message: Message, query: str, lang: str) -> bool:
                 data = await omega_stocks.get_quote(symbol)
                 if not data.get("error"):
                     change_emoji = "📈" if (data.get("change", 0) or 0) >= 0 else "📉"
-                    text = f"📊 **{data.get('name', symbol)} ({data.get('symbol', symbol)})**\n\n"
+                    text = f"📊 *{data.get('name', symbol)} ({data.get('symbol', symbol)})*\n\n"
                     text += f"{t('label_price', lang)}: ${data.get('price', 0):,.2f}\n"
                     text += f"{change_emoji} {t('label_change', lang)}: {data.get('change', 0):+,.2f} ({data.get('change_percent', 0):+.2f}%)\n"
                     if data.get("market_cap"):
@@ -270,7 +270,7 @@ async def _route_to_service(message: Message, query: str, lang: str) -> bool:
             data = await omega_crypto.get_price(coin)
             if not data.get("error"):
                 emoji = "📈" if (data.get("change_24h") or 0) >= 0 else "📉"
-                text = f"₿ **{data.get('name', coin)} ({data.get('symbol', coin).upper()})**\n\n"
+                text = f"₿ *{data.get('name', coin)} ({data.get('symbol', coin).upper()})*\n\n"
                 text += f"{t('label_price', lang)}: ${data.get('price', 0):,.2f}\n"
                 text += f"{emoji} 24h: {data.get('change_24h', 0):+.2f}%\n"
                 if data.get("market_cap"):

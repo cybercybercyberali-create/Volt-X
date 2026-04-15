@@ -24,7 +24,7 @@ async def cmd_flight(message: Message, lang: str = "en") -> None:
             if data.get("error"):
                 await message.answer(t("not_found", lang))
                 return
-            text = f"✈️ **{query}**\n\n"
+            text = f"✈️ *{query}*\n\n"
             text += f"{t('label_departures', lang)} ({len(data['departures'])}):\n"
             for f in data["departures"][:5]:
                 text += f"  {f['callsign']} → {f['arrival']}\n"
@@ -36,7 +36,7 @@ async def cmd_flight(message: Message, lang: str = "en") -> None:
             if data.get("error"):
                 await message.answer(t("not_found", lang))
                 return
-            text = f"✈️ **{data['callsign']}**\n\n"
+            text = f"✈️ *{data['callsign']}*\n\n"
             text += f"🌍 {data.get('origin_country', 'N/A')}\n"
             text += f"📍 {data.get('latitude', 0):.2f}, {data.get('longitude', 0):.2f}\n"
             text += f"{t('label_altitude', lang)}: {data.get('altitude', 0):,.0f}m\n"

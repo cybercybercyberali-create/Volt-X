@@ -142,9 +142,9 @@ def weather_card(data: dict, lang: str) -> str:
         lines = [
             f"🌤 *{location}*",
             sep,
-            f"🌡 درجة الحرارة: **{temp}°C** (يُحسّ كـ {feels}°C)",
-            f"💧 الرطوبة: **{humidity}%**",
-            f"💨 الرياح: **{wind} كم/س** {wind_dir}",
+            f"🌡 درجة الحرارة: *{temp}°C* (يُحسّ كـ {feels}°C)",
+            f"💧 الرطوبة: *{humidity}%*",
+            f"💨 الرياح: *{wind} كم/س* {wind_dir}",
         ]
         if sunrise and sunset:
             lines.append(f"🌅 الشروق: {sunrise} | الغروب: {sunset}")
@@ -155,9 +155,9 @@ def weather_card(data: dict, lang: str) -> str:
         lines = [
             f"🌤 *{location}*",
             sep,
-            f"🌡 Temperature: **{temp}°C** (feels like {feels}°C)",
-            f"💧 Humidity: **{humidity}%**",
-            f"💨 Wind: **{wind} km/h** {wind_dir}",
+            f"🌡 Temperature: *{temp}°C* (feels like {feels}°C)",
+            f"💧 Humidity: *{humidity}%*",
+            f"💨 Wind: *{wind} km/h* {wind_dir}",
         ]
         if sunrise and sunset:
             lines.append(f"🌅 Sunrise: {sunrise} | Sunset: {sunset}")
@@ -184,26 +184,26 @@ def gold_card(data: dict, lang: str) -> str:
         lines = [
             "🥇 *أسعار الذهب والمعادن*",
             sep,
-            f"💛 ذهب 24K: **${xau:,.2f}** / أونصة",
-            f"   **${gram:,.2f}** / غرام",
+            f"💛 ذهب 24K: *${xau:,.2f}* / أونصة",
+            f"   *${gram:,.2f}* / غرام",
         ]
         if xag:
-            lines.append(f"🥈 فضة:    **${xag:,.2f}** / أونصة")
+            lines.append(f"🥈 فضة:    *${xag:,.2f}* / أونصة")
         if xpt:
-            lines.append(f"🔘 بلاتين: **${xpt:,.2f}** / أونصة")
-        lines.append(f"{change_emoji} تغيير 24س: **{change_str}**")
+            lines.append(f"🔘 بلاتين: *${xpt:,.2f}* / أونصة")
+        lines.append(f"{change_emoji} تغيير 24س: *{change_str}*")
     else:
         lines = [
             "🥇 *Gold & Precious Metals*",
             sep,
-            f"💛 Gold 24K: **${xau:,.2f}** / oz",
-            f"   **${gram:,.2f}** / gram",
+            f"💛 Gold 24K: *${xau:,.2f}* / oz",
+            f"   *${gram:,.2f}* / gram",
         ]
         if xag:
-            lines.append(f"🥈 Silver:   **${xag:,.2f}** / oz")
+            lines.append(f"🥈 Silver:   *${xag:,.2f}* / oz")
         if xpt:
-            lines.append(f"🔘 Platinum: **${xpt:,.2f}** / oz")
-        lines.append(f"{change_emoji} 24h Change: **{change_str}**")
+            lines.append(f"🔘 Platinum: *${xpt:,.2f}* / oz")
+        lines.append(f"{change_emoji} 24h Change: *{change_str}*")
 
     return "\n".join(lines)
 
@@ -226,26 +226,26 @@ def crypto_card(data: dict, lang: str) -> str:
         lines = [
             f"₿ *{name} ({symbol})*",
             sep,
-            f"💰 السعر: **${price:,.2f}**",
-            f"{emoji} 24س: **{change_24h:+.2f}%**",
+            f"💰 السعر: *${price:,.2f}*",
+            f"{emoji} 24س: *{change_24h:+.2f}%*",
         ]
         if change_7d is not None:
-            lines.append(f"📊 7 أيام: **{change_7d:+.2f}%**")
-        lines.append(f"🏆 الترتيب: **#{rank}**")
+            lines.append(f"📊 7 أيام: *{change_7d:+.2f}%*")
+        lines.append(f"🏆 الترتيب: *#{rank}*")
         if mcap:
-            lines.append(f"💎 القيمة السوقية: **${mcap:,.0f}**")
+            lines.append(f"💎 القيمة السوقية: *${mcap:,.0f}*")
     else:
         lines = [
             f"₿ *{name} ({symbol})*",
             sep,
-            f"💰 Price: **${price:,.2f}**",
-            f"{emoji} 24h: **{change_24h:+.2f}%**",
+            f"💰 Price: *${price:,.2f}*",
+            f"{emoji} 24h: *{change_24h:+.2f}%*",
         ]
         if change_7d is not None:
-            lines.append(f"📊 7d: **{change_7d:+.2f}%**")
-        lines.append(f"🏆 Rank: **#{rank}**")
+            lines.append(f"📊 7d: *{change_7d:+.2f}%*")
+        lines.append(f"🏆 Rank: *#{rank}*")
         if mcap:
-            lines.append(f"💎 Market Cap: **${mcap:,.0f}**")
+            lines.append(f"💎 Market Cap: *${mcap:,.0f}*")
 
     return "\n".join(lines)
 
@@ -269,26 +269,26 @@ def stock_card(data: dict, lang: str) -> str:
         lines = [
             f"📊 *{name} ({symbol})*",
             sep,
-            f"💰 السعر: **${price:,.2f}**",
-            f"{emoji} التغيير: **{change:+,.2f} ({change_pct:+.2f}%)**",
-            f"📦 الحجم: **{volume:,}**",
+            f"💰 السعر: *${price:,.2f}*",
+            f"{emoji} التغيير: *{change:+,.2f} ({change_pct:+.2f}%)*",
+            f"📦 الحجم: *{volume:,}*",
         ]
         if mcap:
-            lines.append(f"💎 القيمة السوقية: **${mcap:,.0f}**")
+            lines.append(f"💎 القيمة السوقية: *${mcap:,.0f}*")
         if pe:
-            lines.append(f"📐 P/E: **{pe:.2f}**")
+            lines.append(f"📐 P/E: *{pe:.2f}*")
     else:
         lines = [
             f"📊 *{name} ({symbol})*",
             sep,
-            f"💰 Price: **${price:,.2f}**",
-            f"{emoji} Change: **{change:+,.2f} ({change_pct:+.2f}%)**",
-            f"📦 Volume: **{volume:,}**",
+            f"💰 Price: *${price:,.2f}*",
+            f"{emoji} Change: *{change:+,.2f} ({change_pct:+.2f}%)*",
+            f"📦 Volume: *{volume:,}*",
         ]
         if mcap:
-            lines.append(f"💎 Market Cap: **${mcap:,.0f}**")
+            lines.append(f"💎 Market Cap: *${mcap:,.0f}*")
         if pe:
-            lines.append(f"📐 P/E: **{pe:.2f}**")
+            lines.append(f"📐 P/E: *{pe:.2f}*")
 
     return "\n".join(lines)
 
@@ -319,7 +319,7 @@ def currency_card(data: dict, base: str, lang: str) -> str:
                 continue
             rate = rates.get(code)
             if rate is not None:
-                lines.append(f"{flag} {name_ar}: **{rate:,.4f}**")
+                lines.append(f"{flag} {name_ar}: *{rate:,.4f}*")
     else:
         lines = [f"💱 *Currency Rates — Base: {base}*", sep]
         for code, flag, _, name_en in DISPLAY_CURRENCIES:
@@ -327,7 +327,7 @@ def currency_card(data: dict, base: str, lang: str) -> str:
                 continue
             rate = rates.get(code)
             if rate is not None:
-                lines.append(f"{flag} {name_en}: **{rate:,.4f}**")
+                lines.append(f"{flag} {name_en}: *{rate:,.4f}*")
 
     if updated:
         lines.append(f"\n🕐 Updated: {updated}")

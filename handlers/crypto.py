@@ -25,7 +25,7 @@ async def cmd_crypto(message: Message, lang: str = "en") -> None:
         lines = [title, sep]
         for c in data["coins"]:
             emoji = "📈" if (c.get("change_24h") or 0) >= 0 else "📉"
-            lines.append(f"**#{c['rank']}** {c['symbol']} — **${c['price']:,.2f}** {emoji} {c.get('change_24h', 0):+.1f}%")
+            lines.append(f"*#{c['rank']}* {c['symbol']} — *${c['price']:,.2f}* {emoji} {c.get('change_24h', 0):+.1f}%")
         await message.answer("\n".join(lines), parse_mode="Markdown")
         return
 

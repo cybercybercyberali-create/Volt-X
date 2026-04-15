@@ -77,9 +77,17 @@ class OmegaFootball:
         cached = await cache.get(cache_key)
         if cached is not None:
             return cached
+        from datetime import date, timedelta
+        today = date.today()
         params: dict[str, Any] = {"league": league_id, "season": CURRENT_SEASON}
-        if status.upper() not in ("ALL", ""):
+        if status.upper() == "LIVE":
+            params["live"] = "all"
+        elif status.upper() not in ("ALL", ""):
             params["status"] = status.upper()
+        else:
+            # "all" — fetch a 7-day window (3 days back, 3 days forward) to keep results relevant
+            params["from"] = (today - timedelta(days=3)).isoformat()
+            params["to"]   = (today + timedelta(days=4)).isoformat()
         data = await self._get("/fixtures", params)
         if data and "response" in data:
             fixtures = [_normalize_fixture(f, league_code.upper()) for f in data["response"]]

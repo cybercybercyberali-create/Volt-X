@@ -519,16 +519,16 @@ I18N = {
     },
     # ━━━ Sub-keys: Gold ━━━
     "gold_price": {
-        "ar": "🪙 **سعر الذهب**\n\n💰 الأونصة: ${price}",
-        "en": "🪙 **Gold Price**\n\n💰 Ounce: ${price}",
-        "fr": "🪙 **Prix de l'or**\n\n💰 Once: ${price}",
-        "es": "🪙 **Precio del oro**\n\n💰 Onza: ${price}",
-        "tr": "🪙 **Altın Fiyatı**\n\n💰 Ons: ${price}",
-        "ru": "🪙 **Цена золота**\n\n💰 Унция: ${price}",
-        "fa": "🪙 **قیمت طلا**\n\n💰 اونس: ${price}",
-        "de": "🪙 **Goldpreis**\n\n💰 Unze: ${price}",
-        "hi": "🪙 **सोने की कीमत**\n\n💰 औंस: ${price}",
-        "zh-CN": "🪙 **黄金价格**\n\n💰 盎司: ${price}",
+        "ar": "🪙 *سعر الذهب*\n\n💰 الأونصة: ${price}",
+        "en": "🪙 *Gold Price*\n\n💰 Ounce: ${price}",
+        "fr": "🪙 *Prix de l'or*\n\n💰 Once: ${price}",
+        "es": "🪙 *Precio del oro*\n\n💰 Onza: ${price}",
+        "tr": "🪙 *Altın Fiyatı*\n\n💰 Ons: ${price}",
+        "ru": "🪙 *Цена золота*\n\n💰 Унция: ${price}",
+        "fa": "🪙 *قیمت طلا*\n\n💰 اونس: ${price}",
+        "de": "🪙 *Goldpreis*\n\n💰 Unze: ${price}",
+        "hi": "🪙 *सोने की कीमत*\n\n💰 औंस: ${price}",
+        "zh-CN": "🪙 *黄金价格*\n\n💰 盎司: ${price}",
     },
     "gold_karats_btn": {
         "ar": "💍 أسعار العيارات", "en": "💍 Karat Prices", "fr": "💍 Prix des carats",
@@ -536,16 +536,16 @@ I18N = {
         "fa": "💍 قیمت عیارها", "de": "💍 Karatpreise", "hi": "💍 कैरट मूल्य", "zh-CN": "💍 克拉价格",
     },
     "gold_karats_title": {
-        "ar": "💍 **أسعار عيارات الذهب (لكل غرام)**",
-        "en": "💍 **Gold Karat Prices (per gram)**",
-        "fr": "💍 **Prix des carats d'or (par gramme)**",
-        "es": "💍 **Precios por quilate de oro (por gramo)**",
-        "tr": "💍 **Altın Ayar Fiyatları (gram başına)**",
-        "ru": "💍 **Цены по каратам золота (за грамм)**",
-        "fa": "💍 **قیمت عیارهای طلا (هر گرم)**",
-        "de": "💍 **Goldpreise nach Karat (pro Gramm)**",
-        "hi": "💍 **सोने के कैरट मूल्य (प्रति ग्राम)**",
-        "zh-CN": "💍 **黄金克拉价格（每克）**",
+        "ar": "💍 *أسعار عيارات الذهب (لكل غرام)*",
+        "en": "💍 *Gold Karat Prices (per gram)*",
+        "fr": "💍 *Prix des carats d'or (par gramme)*",
+        "es": "💍 *Precios por quilate de oro (por gramo)*",
+        "tr": "💍 *Altın Ayar Fiyatları (gram başına)*",
+        "ru": "💍 *Цены по каратам золота (за грамм)*",
+        "fa": "💍 *قیمت عیارهای طلا (هر گرم)*",
+        "de": "💍 *Goldpreise nach Karat (pro Gramm)*",
+        "hi": "💍 *सोने के कैरट मूल्य (प्रति ग्राम)*",
+        "zh-CN": "💍 *黄金克拉价格（每克）*",
     },
     "btn_refresh": {
         "ar": "🔄 تحديث", "en": "🔄 Refresh", "fr": "🔄 Actualiser",
@@ -564,32 +564,32 @@ I18N = {
     },
     # ━━━ Sub-keys: Currency ━━━
     "currency_rate": {
-        "ar": "💱 **{base} → {target}**\n\n💰 السعر: {rate}",
-        "en": "💱 **{base} → {target}**\n\n💰 Rate: {rate}",
-        "fr": "💱 **{base} → {target}**\n\n💰 Taux: {rate}",
-        "es": "💱 **{base} → {target}**\n\n💰 Tasa: {rate}",
-        "tr": "💱 **{base} → {target}**\n\n💰 Kur: {rate}",
-        "ru": "💱 **{base} → {target}**\n\n💰 Курс: {rate}",
+        "ar": "💱 *{base} → {target}*\n\n💰 السعر: {rate}",
+        "en": "💱 *{base} → {target}*\n\n💰 Rate: {rate}",
+        "fr": "💱 *{base} → {target}*\n\n💰 Taux: {rate}",
+        "es": "💱 *{base} → {target}*\n\n💰 Tasa: {rate}",
+        "tr": "💱 *{base} → {target}*\n\n💰 Kur: {rate}",
+        "ru": "💱 *{base} → {target}*\n\n💰 Курс: {rate}",
     },
     "currency_parallel": {
-        "ar": "⚠️ **السعر الموازي:** {rate}", "en": "⚠️ **Parallel rate:** {rate}",
-        "fr": "⚠️ **Taux parallèle:** {rate}", "es": "⚠️ **Tasa paralela:** {rate}",
-        "tr": "⚠️ **Paralel kur:** {rate}", "ru": "⚠️ **Параллельный курс:** {rate}",
+        "ar": "⚠️ *السعر الموازي:* {rate}", "en": "⚠️ *Parallel rate:* {rate}",
+        "fr": "⚠️ *Taux parallèle:* {rate}", "es": "⚠️ *Tasa paralela:* {rate}",
+        "tr": "⚠️ *Paralel kur:* {rate}", "ru": "⚠️ *Параллельный курс:* {rate}",
     },
     # ━━━ Sub-keys: Weather ━━━
     "weather_result": {
-        "ar": "🌤 **الطقس في {city}**\n\n🌡 الحرارة: {temp}°C\n🤔 الإحساس: {feels}°C\n💧 الرطوبة: {humidity}%\n💨 الرياح: {wind} km/h\n📝 {desc}",
-        "en": "🌤 **Weather in {city}**\n\n🌡 Temp: {temp}°C\n🤔 Feels: {feels}°C\n💧 Humidity: {humidity}%\n💨 Wind: {wind} km/h\n📝 {desc}",
-        "fr": "🌤 **Météo à {city}**\n\n🌡 Temp: {temp}°C\n💧 Humidité: {humidity}%\n💨 Vent: {wind} km/h\n📝 {desc}",
-        "es": "🌤 **Clima en {city}**\n\n🌡 Temp: {temp}°C\n💧 Humedad: {humidity}%\n💨 Viento: {wind} km/h\n📝 {desc}",
-        "tr": "🌤 **{city} Hava Durumu**\n\n🌡 Sıcaklık: {temp}°C\n💧 Nem: {humidity}%\n💨 Rüzgar: {wind} km/h\n📝 {desc}",
-        "ru": "🌤 **Погода в {city}**\n\n🌡 Темп: {temp}°C\n💧 Влажность: {humidity}%\n💨 Ветер: {wind} км/ч\n📝 {desc}",
+        "ar": "🌤 *الطقس في {city}*\n\n🌡 الحرارة: {temp}°C\n🤔 الإحساس: {feels}°C\n💧 الرطوبة: {humidity}%\n💨 الرياح: {wind} km/h\n📝 {desc}",
+        "en": "🌤 *Weather in {city}*\n\n🌡 Temp: {temp}°C\n🤔 Feels: {feels}°C\n💧 Humidity: {humidity}%\n💨 Wind: {wind} km/h\n📝 {desc}",
+        "fr": "🌤 *Météo à {city}*\n\n🌡 Temp: {temp}°C\n💧 Humidité: {humidity}%\n💨 Vent: {wind} km/h\n📝 {desc}",
+        "es": "🌤 *Clima en {city}*\n\n🌡 Temp: {temp}°C\n💧 Humedad: {humidity}%\n💨 Viento: {wind} km/h\n📝 {desc}",
+        "tr": "🌤 *{city} Hava Durumu*\n\n🌡 Sıcaklık: {temp}°C\n💧 Nem: {humidity}%\n💨 Rüzgar: {wind} km/h\n📝 {desc}",
+        "ru": "🌤 *Погода в {city}*\n\n🌡 Темп: {temp}°C\n💧 Влажность: {humidity}%\n💨 Ветер: {wind} км/ч\n📝 {desc}",
     },
     # ━━━ Sub-keys: Football ━━━
     "fb_choose_league": {
-        "ar": "⚽ **اختر الدوري:**", "en": "⚽ **Choose league:**",
-        "fr": "⚽ **Choisir la ligue:**", "es": "⚽ **Elige la liga:**",
-        "tr": "⚽ **Lig seçin:**", "ru": "⚽ **Выберите лигу:**",
+        "ar": "⚽ *اختر الدوري:*", "en": "⚽ *Choose league:*",
+        "fr": "⚽ *Choisir la ligue:*", "es": "⚽ *Elige la liga:*",
+        "tr": "⚽ *Lig seçin:*", "ru": "⚽ *Выберите лигу:*",
     },
     "fb_live_btn": {
         "ar": "🔴 مباشر", "en": "🔴 Live", "fr": "🔴 En direct",
@@ -602,13 +602,13 @@ I18N = {
     },
     # ━━━ Sub-keys: Stocks ━━━
     "stock_result": {
-        "ar": "📊 **{name} ({symbol})**\n\n💰 السعر: ${price}\n{emoji} التغير: {change} ({pct}%)\n📊 الحجم: {volume}",
-        "en": "📊 **{name} ({symbol})**\n\n💰 Price: ${price}\n{emoji} Change: {change} ({pct}%)\n📊 Volume: {volume}",
+        "ar": "📊 *{name} ({symbol})*\n\n💰 السعر: ${price}\n{emoji} التغير: {change} ({pct}%)\n📊 الحجم: {volume}",
+        "en": "📊 *{name} ({symbol})*\n\n💰 Price: ${price}\n{emoji} Change: {change} ({pct}%)\n📊 Volume: {volume}",
     },
     # ━━━ Sub-keys: Crypto ━━━
     "crypto_result": {
-        "ar": "₿ **{name} ({symbol})**\n\n💰 السعر: ${price}\n{emoji} 24h: {change}%\n🏆 الترتيب: #{rank}\n📊 القيمة السوقية: ${mcap}",
-        "en": "₿ **{name} ({symbol})**\n\n💰 Price: ${price}\n{emoji} 24h: {change}%\n🏆 Rank: #{rank}\n📊 Market Cap: ${mcap}",
+        "ar": "₿ *{name} ({symbol})*\n\n💰 السعر: ${price}\n{emoji} 24h: {change}%\n🏆 الترتيب: #{rank}\n📊 القيمة السوقية: ${mcap}",
+        "en": "₿ *{name} ({symbol})*\n\n💰 Price: ${price}\n{emoji} 24h: {change}%\n🏆 Rank: #{rank}\n📊 Market Cap: ${mcap}",
     },
     # ━━━ Sub-keys: Common ━━━
     "fetching": {
@@ -630,11 +630,11 @@ I18N = {
     },
     # ━━━ Sub-keys: Start & Help ━━━
     "help_text": {
-        "ar": "🤖 **Omega Bot**\n\nالأوامر:\n/gold — ذهب\n/currency USD EUR — عملات\n/fuel LB — محروقات\n/weather London — طقس\n/football PL — كرة قدم\n/movie Inception — أفلام\n/cv — سيرة ذاتية\n/logo — شعار\n/stock AAPL — أسهم\n/crypto bitcoin — كريبتو\n/news — أخبار\n/flight LH400 — رحلات\n/quakes — زلازل\n/settings — إعدادات\n\nأو أرسل أي سؤال مباشرة!",
-        "en": "🤖 **Omega Bot**\n\nCommands:\n/gold — Gold prices\n/currency USD EUR — Exchange\n/fuel LB — Fuel prices\n/weather London — Weather\n/football PL — Football\n/movie Inception — Movies\n/cv — Generate CV\n/logo — Logo design\n/stock AAPL — Stocks\n/crypto bitcoin — Crypto\n/news — Headlines\n/flight LH400 — Flights\n/quakes — Earthquakes\n/settings — Settings\n\nOr just type any question!",
-        "fr": "🤖 **Omega Bot**\n\nCommandes:\n/gold — Or\n/currency — Devises\n/weather — Météo\n/news — Actualités\n/settings — Paramètres\n\nOu posez une question!",
-        "tr": "🤖 **Omega Bot**\n\nKomutlar:\n/gold — Altın\n/currency — Döviz\n/weather — Hava\n/news — Haberler\n/settings — Ayarlar\n\nVeya bir soru yazın!",
-        "ru": "🤖 **Omega Bot**\n\nКоманды:\n/gold — Золото\n/currency — Валюты\n/weather — Погода\n/news — Новости\n/settings — Настройки\n\nИли задайте вопрос!",
+        "ar": "🤖 *Omega Bot*\n\nالأوامر:\n/gold — ذهب\n/currency USD EUR — عملات\n/fuel LB — محروقات\n/weather London — طقس\n/football PL — كرة قدم\n/movie Inception — أفلام\n/cv — سيرة ذاتية\n/logo — شعار\n/stock AAPL — أسهم\n/crypto bitcoin — كريبتو\n/news — أخبار\n/flight LH400 — رحلات\n/quakes — زلازل\n/settings — إعدادات\n\nأو أرسل أي سؤال مباشرة!",
+        "en": "🤖 *Omega Bot*\n\nCommands:\n/gold — Gold prices\n/currency USD EUR — Exchange\n/fuel LB — Fuel prices\n/weather London — Weather\n/football PL — Football\n/movie Inception — Movies\n/cv — Generate CV\n/logo — Logo design\n/stock AAPL — Stocks\n/crypto bitcoin — Crypto\n/news — Headlines\n/flight LH400 — Flights\n/quakes — Earthquakes\n/settings — Settings\n\nOr just type any question!",
+        "fr": "🤖 *Omega Bot*\n\nCommandes:\n/gold — Or\n/currency — Devises\n/weather — Météo\n/news — Actualités\n/settings — Paramètres\n\nOu posez une question!",
+        "tr": "🤖 *Omega Bot*\n\nKomutlar:\n/gold — Altın\n/currency — Döviz\n/weather — Hava\n/news — Haberler\n/settings — Ayarlar\n\nVeya bir soru yazın!",
+        "ru": "🤖 *Omega Bot*\n\nКоманды:\n/gold — Золото\n/currency — Валюты\n/weather — Погода\n/news — Новости\n/settings — Настройки\n\nИли задайте вопрос!",
     },
     "admin_only": {
         "ar": "⛔ هذا الأمر للمشرفين فقط", "en": "⛔ Admin only",
@@ -642,18 +642,18 @@ I18N = {
     },
     # ━━━ Sub-keys: Currency detail ━━━
     "currency_rates_title": {
-        "ar": "💱 **أسعار {base}**", "en": "💱 **{base} Rates**",
-        "fr": "💱 **Taux {base}**", "tr": "💱 **{base} Kurları**", "ru": "💱 **Курсы {base}**",
+        "ar": "💱 *أسعار {base}*", "en": "💱 *{base} Rates*",
+        "fr": "💱 *Taux {base}*", "tr": "💱 *{base} Kurları*", "ru": "💱 *Курсы {base}*",
     },
     # ━━━ Sub-keys: Fuel ━━━
     "fuel_title_country": {
-        "ar": "⛽ **أسعار المحروقات — {country}**", "en": "⛽ **Fuel Prices — {country}**",
-        "fr": "⛽ **Prix carburant — {country}**", "tr": "⛽ **Yakıt — {country}**", "ru": "⛽ **Топливо — {country}**",
+        "ar": "⛽ *أسعار المحروقات — {country}*", "en": "⛽ *Fuel Prices — {country}*",
+        "fr": "⛽ *Prix carburant — {country}*", "tr": "⛽ *Yakıt — {country}*", "ru": "⛽ *Топливо — {country}*",
     },
     # ━━━ Sub-keys: Movies ━━━
     "trending_title": {
-        "ar": "🎬 **الأفلام الرائجة:**", "en": "🎬 **Trending Movies:**",
-        "fr": "🎬 **Films tendance:**", "tr": "🎬 **Trend Filmler:**", "ru": "🎬 **Популярные фильмы:**",
+        "ar": "🎬 *الأفلام الرائجة:*", "en": "🎬 *Trending Movies:*",
+        "fr": "🎬 *Films tendance:*", "tr": "🎬 *Trend Filmler:*", "ru": "🎬 *Популярные фильмы:*",
     },
     "search_hint": {
         "ar": "🔍 للبحث: /movie اسم الفيلم", "en": "🔍 Search: /movie name",
@@ -669,8 +669,8 @@ I18N = {
     },
     # ━━━ Sub-keys: News ━━━
     "news_headline": {
-        "ar": "📰 **آخر الأخبار:**", "en": "📰 **Latest News:**",
-        "fr": "📰 **Dernières nouvelles:**", "tr": "📰 **Son Haberler:**", "ru": "📰 **Последние новости:**",
+        "ar": "📰 *آخر الأخبار:*", "en": "📰 *Latest News:*",
+        "fr": "📰 *Dernières nouvelles:*", "tr": "📰 *Son Haberler:*", "ru": "📰 *Последние новости:*",
     },
     "read_more": {
         "ar": "🔗 اقرأ المزيد", "en": "🔗 Read more", "fr": "🔗 Lire la suite",
@@ -678,8 +678,8 @@ I18N = {
     },
     # ━━━ Sub-keys: Crypto ━━━
     "crypto_top_title": {
-        "ar": "₿ **العملات الرقمية:**", "en": "₿ **Cryptocurrencies:**",
-        "fr": "₿ **Cryptomonnaies:**", "tr": "₿ **Kripto Paralar:**", "ru": "₿ **Криптовалюты:**",
+        "ar": "₿ *العملات الرقمية:*", "en": "₿ *Cryptocurrencies:*",
+        "fr": "₿ *Cryptomonnaies:*", "tr": "₿ *Kripto Paralar:*", "ru": "₿ *Криптовалюты:*",
     },
     "crypto_detail_hint": {
         "ar": "🔍 للتفاصيل: /crypto bitcoin", "en": "🔍 Details: /crypto bitcoin",
@@ -699,21 +699,21 @@ I18N = {
     },
     # ━━━ Sub-keys: AI ━━━
     "ai_intro": {
-        "ar": "🤖 **مساعد AI الذكي**\n\nاكتب سؤالك بعد /ai\nأو أرسل أي رسالة مباشرة!",
-        "en": "🤖 **AI Smart Assistant**\n\nType your question after /ai\nOr just send any message!",
-        "fr": "🤖 **Assistant IA**\n\nÉcrivez après /ai\nOu envoyez un message!",
-        "tr": "🤖 **AI Asistan**\n\n/ai sonrası sorunuzu yazın\nVeya direkt mesaj gönderin!",
+        "ar": "🤖 *مساعد AI الذكي*\n\nاكتب سؤالك بعد /ai\nأو أرسل أي رسالة مباشرة!",
+        "en": "🤖 *AI Smart Assistant*\n\nType your question after /ai\nOr just send any message!",
+        "fr": "🤖 *Assistant IA*\n\nÉcrivez après /ai\nOu envoyez un message!",
+        "tr": "🤖 *AI Asistan*\n\n/ai sonrası sorunuzu yazın\nVeya direkt mesaj gönderin!",
     },
     # ━━━ Sub-keys: CV ━━━
     "cv_intro": {
-        "ar": "📄 **إنشاء سيرة ذاتية احترافية**\n\nسأطلب منك 9 معلومات.",
-        "en": "📄 **Professional CV Generator**\n\nI will ask you 9 questions.",
-        "fr": "📄 **Générateur de CV**\n\n9 questions à remplir.",
-        "tr": "📄 **Profesyonel CV Oluşturucu**\n\n9 soru soracağım.",
+        "ar": "📄 *إنشاء سيرة ذاتية احترافية*\n\nسأطلب منك 9 معلومات.",
+        "en": "📄 *Professional CV Generator*\n\nI will ask you 9 questions.",
+        "fr": "📄 *Générateur de CV*\n\n9 questions à remplir.",
+        "tr": "📄 *Profesyonel CV Oluşturucu*\n\n9 soru soracağım.",
     },
     "cv_step": {
-        "ar": "{n}️⃣ **الخطوة {n}/9:** {q}", "en": "{n}️⃣ **Step {n}/9:** {q}",
-        "fr": "{n}️⃣ **Étape {n}/9:** {q}", "tr": "{n}️⃣ **Adım {n}/9:** {q}",
+        "ar": "{n}️⃣ *الخطوة {n}/9:* {q}", "en": "{n}️⃣ *Step {n}/9:* {q}",
+        "fr": "{n}️⃣ *Étape {n}/9:* {q}", "tr": "{n}️⃣ *Adım {n}/9:* {q}",
     },
     "cv_q_name": {"ar": "ما اسمك الكامل؟", "en": "What is your full name?", "fr": "Votre nom complet?", "tr": "Tam adınız?"},
     "cv_q_email": {"ar": "ما بريدك الإلكتروني؟", "en": "Your email?", "fr": "Votre email?", "tr": "E-posta adresiniz?"},
@@ -728,10 +728,10 @@ I18N = {
     "cv_done": {"ar": "✅ سيرتك الذاتية جاهزة!", "en": "✅ Your CV is ready!", "fr": "✅ Votre CV est prêt!", "tr": "✅ CV'niz hazır!"},
     # ━━━ Sub-keys: Logo ━━━
     "logo_intro": {
-        "ar": "🎨 **مولّد الشعارات**\n\nأرسل اسم المشروع:\n/logo اسم المشروع",
-        "en": "🎨 **Logo Generator**\n\nSend project name:\n/logo ProjectName",
-        "fr": "🎨 **Générateur de logo**\n\nEnvoyez le nom:\n/logo NomProjet",
-        "tr": "🎨 **Logo Oluşturucu**\n\nProje adı gönderin:\n/logo ProjeAdı",
+        "ar": "🎨 *مولّد الشعارات*\n\nأرسل اسم المشروع:\n/logo اسم المشروع",
+        "en": "🎨 *Logo Generator*\n\nSend project name:\n/logo ProjectName",
+        "fr": "🎨 *Générateur de logo*\n\nEnvoyez le nom:\n/logo NomProjet",
+        "tr": "🎨 *Logo Oluşturucu*\n\nProje adı gönderin:\n/logo ProjeAdı",
     },
     "logo_generating": {"ar": "⏳ جاري تصميم الشعار...", "en": "⏳ Designing logo...", "fr": "⏳ Création du logo...", "tr": "⏳ Logo tasarlanıyor..."},
     # ━━━ Sub-keys: Settings ━━━
@@ -757,9 +757,9 @@ I18N = {
     "label_note": {"ar": "📝 ملاحظة", "en": "📝 Note", "fr": "📝 Note", "tr": "📝 Not", "ru": "📝 Примечание"},
     "label_parallel": {"ar": "⚠️ السعر الموازي", "en": "⚠️ Parallel rate", "fr": "⚠️ Taux parallèle", "tr": "⚠️ Paralel kur", "ru": "⚠️ Параллельный курс"},
     "fb_live_title": {
-        "ar": "🔴 **مباريات مباشرة:**", "en": "🔴 **Live Matches:**",
-        "fr": "🔴 **Matchs en direct:**", "tr": "🔴 **Canli Maclar:**",
-        "es": "🔴 **Partidos en vivo:**", "ru": "🔴 **Живые матчи:**",
+        "ar": "🔴 *مباريات مباشرة:*", "en": "🔴 *Live Matches:*",
+        "fr": "🔴 *Matchs en direct:*", "tr": "🔴 *Canli Maclar:*",
+        "es": "🔴 *Partidos en vivo:*", "ru": "🔴 *Живые матчи:*",
     },
     "label_departures": {
         "ar": "🛫 المغادرات", "en": "🛫 Departures", "fr": "🛫 Departs",
@@ -782,8 +782,8 @@ I18N = {
         "tr": "🧭 Yon", "es": "🧭 Rumbo", "ru": "🧭 Курс",
     },
     "stats_title": {
-        "ar": "📊 **إحصائيات Omega Bot**", "en": "📊 **Omega Bot Stats**",
-        "fr": "📊 **Stats Omega Bot**", "tr": "📊 **Omega Bot Istatistikler**",
+        "ar": "📊 *إحصائيات Omega Bot*", "en": "📊 *Omega Bot Stats*",
+        "fr": "📊 *Stats Omega Bot*", "tr": "📊 *Omega Bot Istatistikler*",
     },
     "stats_system": {
         "ar": "📋 النظام", "en": "📋 System", "fr": "📋 Systeme", "tr": "📋 Sistem",
@@ -3205,9 +3205,9 @@ def weather_card(data: dict, lang: str) -> str:
         lines = [
             f"🌤 *{location}*",
             sep,
-            f"🌡 درجة الحرارة: **{temp}°C** (يُحسّ كـ {feels}°C)",
-            f"💧 الرطوبة: **{humidity}%**",
-            f"💨 الرياح: **{wind} كم/س** {wind_dir}",
+            f"🌡 درجة الحرارة: *{temp}°C* (يُحسّ كـ {feels}°C)",
+            f"💧 الرطوبة: *{humidity}%*",
+            f"💨 الرياح: *{wind} كم/س* {wind_dir}",
         ]
         if sunrise and sunset:
             lines.append(f"🌅 الشروق: {sunrise} | الغروب: {sunset}")
@@ -3218,9 +3218,9 @@ def weather_card(data: dict, lang: str) -> str:
         lines = [
             f"🌤 *{location}*",
             sep,
-            f"🌡 Temperature: **{temp}°C** (feels like {feels}°C)",
-            f"💧 Humidity: **{humidity}%**",
-            f"💨 Wind: **{wind} km/h** {wind_dir}",
+            f"🌡 Temperature: *{temp}°C* (feels like {feels}°C)",
+            f"💧 Humidity: *{humidity}%*",
+            f"💨 Wind: *{wind} km/h* {wind_dir}",
         ]
         if sunrise and sunset:
             lines.append(f"🌅 Sunrise: {sunrise} | Sunset: {sunset}")
@@ -3247,26 +3247,26 @@ def gold_card(data: dict, lang: str) -> str:
         lines = [
             "🥇 *أسعار الذهب والمعادن*",
             sep,
-            f"💛 ذهب 24K: **${xau:,.2f}** / أونصة",
-            f"   **${gram:,.2f}** / غرام",
+            f"💛 ذهب 24K: *${xau:,.2f}* / أونصة",
+            f"   *${gram:,.2f}* / غرام",
         ]
         if xag:
-            lines.append(f"🥈 فضة:    **${xag:,.2f}** / أونصة")
+            lines.append(f"🥈 فضة:    *${xag:,.2f}* / أونصة")
         if xpt:
-            lines.append(f"🔘 بلاتين: **${xpt:,.2f}** / أونصة")
-        lines.append(f"{change_emoji} تغيير 24س: **{change_str}**")
+            lines.append(f"🔘 بلاتين: *${xpt:,.2f}* / أونصة")
+        lines.append(f"{change_emoji} تغيير 24س: *{change_str}*")
     else:
         lines = [
             "🥇 *Gold & Precious Metals*",
             sep,
-            f"💛 Gold 24K: **${xau:,.2f}** / oz",
-            f"   **${gram:,.2f}** / gram",
+            f"💛 Gold 24K: *${xau:,.2f}* / oz",
+            f"   *${gram:,.2f}* / gram",
         ]
         if xag:
-            lines.append(f"🥈 Silver:   **${xag:,.2f}** / oz")
+            lines.append(f"🥈 Silver:   *${xag:,.2f}* / oz")
         if xpt:
-            lines.append(f"🔘 Platinum: **${xpt:,.2f}** / oz")
-        lines.append(f"{change_emoji} 24h Change: **{change_str}**")
+            lines.append(f"🔘 Platinum: *${xpt:,.2f}* / oz")
+        lines.append(f"{change_emoji} 24h Change: *{change_str}*")
 
     return "\n".join(lines)
 
@@ -3289,26 +3289,26 @@ def crypto_card(data: dict, lang: str) -> str:
         lines = [
             f"₿ *{name} ({symbol})*",
             sep,
-            f"💰 السعر: **${price:,.2f}**",
-            f"{emoji} 24س: **{change_24h:+.2f}%**",
+            f"💰 السعر: *${price:,.2f}*",
+            f"{emoji} 24س: *{change_24h:+.2f}%*",
         ]
         if change_7d is not None:
-            lines.append(f"📊 7 أيام: **{change_7d:+.2f}%**")
-        lines.append(f"🏆 الترتيب: **#{rank}**")
+            lines.append(f"📊 7 أيام: *{change_7d:+.2f}%*")
+        lines.append(f"🏆 الترتيب: *#{rank}*")
         if mcap:
-            lines.append(f"💎 القيمة السوقية: **${mcap:,.0f}**")
+            lines.append(f"💎 القيمة السوقية: *${mcap:,.0f}*")
     else:
         lines = [
             f"₿ *{name} ({symbol})*",
             sep,
-            f"💰 Price: **${price:,.2f}**",
-            f"{emoji} 24h: **{change_24h:+.2f}%**",
+            f"💰 Price: *${price:,.2f}*",
+            f"{emoji} 24h: *{change_24h:+.2f}%*",
         ]
         if change_7d is not None:
-            lines.append(f"📊 7d: **{change_7d:+.2f}%**")
-        lines.append(f"🏆 Rank: **#{rank}**")
+            lines.append(f"📊 7d: *{change_7d:+.2f}%*")
+        lines.append(f"🏆 Rank: *#{rank}*")
         if mcap:
-            lines.append(f"💎 Market Cap: **${mcap:,.0f}**")
+            lines.append(f"💎 Market Cap: *${mcap:,.0f}*")
 
     return "\n".join(lines)
 
@@ -3332,26 +3332,26 @@ def stock_card(data: dict, lang: str) -> str:
         lines = [
             f"📊 *{name} ({symbol})*",
             sep,
-            f"💰 السعر: **${price:,.2f}**",
-            f"{emoji} التغيير: **{change:+,.2f} ({change_pct:+.2f}%)**",
-            f"📦 الحجم: **{volume:,}**",
+            f"💰 السعر: *${price:,.2f}*",
+            f"{emoji} التغيير: *{change:+,.2f} ({change_pct:+.2f}%)*",
+            f"📦 الحجم: *{volume:,}*",
         ]
         if mcap:
-            lines.append(f"💎 القيمة السوقية: **${mcap:,.0f}**")
+            lines.append(f"💎 القيمة السوقية: *${mcap:,.0f}*")
         if pe:
-            lines.append(f"📐 P/E: **{pe:.2f}**")
+            lines.append(f"📐 P/E: *{pe:.2f}*")
     else:
         lines = [
             f"📊 *{name} ({symbol})*",
             sep,
-            f"💰 Price: **${price:,.2f}**",
-            f"{emoji} Change: **{change:+,.2f} ({change_pct:+.2f}%)**",
-            f"📦 Volume: **{volume:,}**",
+            f"💰 Price: *${price:,.2f}*",
+            f"{emoji} Change: *{change:+,.2f} ({change_pct:+.2f}%)*",
+            f"📦 Volume: *{volume:,}*",
         ]
         if mcap:
-            lines.append(f"💎 Market Cap: **${mcap:,.0f}**")
+            lines.append(f"💎 Market Cap: *${mcap:,.0f}*")
         if pe:
-            lines.append(f"📐 P/E: **{pe:.2f}**")
+            lines.append(f"📐 P/E: *{pe:.2f}*")
 
     return "\n".join(lines)
 
@@ -3382,7 +3382,7 @@ def currency_card(data: dict, base: str, lang: str) -> str:
                 continue
             rate = rates.get(code)
             if rate is not None:
-                lines.append(f"{flag} {name_ar}: **{rate:,.4f}**")
+                lines.append(f"{flag} {name_ar}: *{rate:,.4f}*")
     else:
         lines = [f"💱 *Currency Rates — Base: {base}*", sep]
         for code, flag, _, name_en in DISPLAY_CURRENCIES:
@@ -3390,7 +3390,7 @@ def currency_card(data: dict, base: str, lang: str) -> str:
                 continue
             rate = rates.get(code)
             if rate is not None:
-                lines.append(f"{flag} {name_en}: **{rate:,.4f}**")
+                lines.append(f"{flag} {name_en}: *{rate:,.4f}*")
 
     if updated:
         lines.append(f"\n🕐 Updated: {updated}")
@@ -4761,9 +4761,17 @@ class OmegaFootball:
         cached = await cache.get(cache_key)
         if cached is not None:
             return cached
+        from datetime import date, timedelta
+        today = date.today()
         params: dict[str, Any] = {"league": league_id, "season": CURRENT_SEASON}
-        if status.upper() not in ("ALL", ""):
+        if status.upper() == "LIVE":
+            params["live"] = "all"
+        elif status.upper() not in ("ALL", ""):
             params["status"] = status.upper()
+        else:
+            # "all" — fetch a 7-day window (3 days back, 3 days forward) to keep results relevant
+            params["from"] = (today - timedelta(days=3)).isoformat()
+            params["to"]   = (today + timedelta(days=4)).isoformat()
         data = await self._get("/fixtures", params)
         if data and "response" in data:
             fixtures = [_normalize_fixture(f, league_code.upper()) for f in data["response"]]
@@ -4850,6 +4858,16 @@ from typing import Any, Optional
 
 from api_clients.base_client import BaseAPIClient
 from config import settings, CACHE_TTL
+
+# TMDB genre ID → name (covers movies + TV)
+_GENRE_MAP: dict[int, str] = {
+    28: "Action", 12: "Adventure", 16: "Animation", 35: "Comedy", 80: "Crime",
+    99: "Documentary", 18: "Drama", 10751: "Family", 14: "Fantasy", 36: "History",
+    27: "Horror", 10402: "Music", 9648: "Mystery", 10749: "Romance", 878: "Sci-Fi",
+    53: "Thriller", 10752: "War", 37: "Western", 10759: "Action & Adventure",
+    10762: "Kids", 10763: "News", 10764: "Reality", 10765: "Sci-Fi & Fantasy",
+    10766: "Soap", 10767: "Talk", 10768: "War & Politics", 10770: "TV Movie",
+}
 from services.cache_service import cache
 
 logger = logging.getLogger(__name__)
@@ -4922,6 +4940,7 @@ class OmegaMovies:
                     "vote_average": item.get("vote_average", 0),
                     "poster": f"https://image.tmdb.org/t/p/w500{item['poster_path']}" if item.get("poster_path") else "",
                     "release_date": item.get("release_date") or item.get("first_air_date", ""),
+                    "genres": [_GENRE_MAP[g] for g in item.get("genre_ids", []) if g in _GENRE_MAP][:3],
                 } for item in data["results"][:20]]
 
                 result = {"results": results, "error": False}
@@ -4949,6 +4968,7 @@ class OmegaMovies:
                     "vote_average": item.get("vote_average", 0),
                     "poster": f"https://image.tmdb.org/t/p/w500{item['poster_path']}" if item.get("poster_path") else "",
                     "release_date": item.get("release_date") or item.get("first_air_date", ""),
+                    "genres": [_GENRE_MAP[g] for g in item.get("genre_ids", []) if g in _GENRE_MAP][:3],
                 } for item in data["results"][:10]]
                 return {"results": results, "error": False}
         except Exception as exc:
@@ -6011,7 +6031,7 @@ async def cmd_gold(message: Message, lang: str = "en") -> None:
             karat_lines.append(karat_label)
             for k in ["24K", "22K", "21K", "18K", "14K", "9K"]:
                 if k in data["karats"]:
-                    karat_lines.append(f"  {k}: **${data['karats'][k]['per_gram']:,.2f}**")
+                    karat_lines.append(f"  {k}: *${data['karats'][k]['per_gram']:,.2f}*")
             text += "\n".join(karat_lines)
 
         buttons = InlineKeyboardMarkup(inline_keyboard=[
@@ -6035,7 +6055,7 @@ async def handle_metal(callback: CallbackQuery, lang: str = "en") -> None:
             await callback.message.answer(t("error", lang))
             return
         name = METAL_NAMES.get(metal, {}).get(lang, METAL_NAMES.get(metal, {}).get("en", metal))
-        text = f"🪙 **{name}**\n\n💰 ${data['price_per_ounce']:,.2f}"
+        text = f"🪙 *{name}*\n\n💰 ${data['price_per_ounce']:,.2f}"
         await callback.message.answer(text, parse_mode="Markdown")
     except Exception as exc:
         logger.error(f"Metal callback error: {exc}", exc_info=True)
@@ -6837,7 +6857,7 @@ async def _route_to_service(message: Message, query: str, lang: str) -> bool:
             await message.answer(t("fetching", lang))
             data = await omega_weather.get_weather(city, lang)
             if not data.get("error"):
-                text = f"🌤 **{data.get('city', city)}**\n\n"
+                text = f"🌤 *{data.get('city', city)}*\n\n"
                 text += f"🌡 {t('label_temp', lang)}: {data['temperature']}°C\n"
                 text += f"🤔 {t('label_feels', lang)}: {data.get('feels_like', 'N/A')}°C\n"
                 text += f"💧 {t('label_humidity', lang)}: {data.get('humidity', 'N/A')}%\n"
@@ -6885,7 +6905,7 @@ async def _route_to_service(message: Message, query: str, lang: str) -> bool:
                 data = await omega_stocks.get_quote(symbol)
                 if not data.get("error"):
                     change_emoji = "📈" if (data.get("change", 0) or 0) >= 0 else "📉"
-                    text = f"📊 **{data.get('name', symbol)} ({data.get('symbol', symbol)})**\n\n"
+                    text = f"📊 *{data.get('name', symbol)} ({data.get('symbol', symbol)})*\n\n"
                     text += f"{t('label_price', lang)}: ${data.get('price', 0):,.2f}\n"
                     text += f"{change_emoji} {t('label_change', lang)}: {data.get('change', 0):+,.2f} ({data.get('change_percent', 0):+.2f}%)\n"
                     if data.get("market_cap"):
@@ -6912,7 +6932,7 @@ async def _route_to_service(message: Message, query: str, lang: str) -> bool:
             data = await omega_crypto.get_price(coin)
             if not data.get("error"):
                 emoji = "📈" if (data.get("change_24h") or 0) >= 0 else "📉"
-                text = f"₿ **{data.get('name', coin)} ({data.get('symbol', coin).upper()})**\n\n"
+                text = f"₿ *{data.get('name', coin)} ({data.get('symbol', coin).upper()})*\n\n"
                 text += f"{t('label_price', lang)}: ${data.get('price', 0):,.2f}\n"
                 text += f"{emoji} 24h: {data.get('change_24h', 0):+.2f}%\n"
                 if data.get("market_cap"):
@@ -7072,7 +7092,7 @@ async def cmd_crypto(message: Message, lang: str = "en") -> None:
         lines = [title, sep]
         for c in data["coins"]:
             emoji = "📈" if (c.get("change_24h") or 0) >= 0 else "📉"
-            lines.append(f"**#{c['rank']}** {c['symbol']} — **${c['price']:,.2f}** {emoji} {c.get('change_24h', 0):+.1f}%")
+            lines.append(f"*#{c['rank']}* {c['symbol']} — *${c['price']:,.2f}* {emoji} {c.get('change_24h', 0):+.1f}%")
         await message.answer("\n".join(lines), parse_mode="Markdown")
         return
 
@@ -7215,7 +7235,7 @@ async def cmd_flight(message: Message, lang: str = "en") -> None:
             if data.get("error"):
                 await message.answer(t("not_found", lang))
                 return
-            text = f"✈️ **{query}**\n\n"
+            text = f"✈️ *{query}*\n\n"
             text += f"{t('label_departures', lang)} ({len(data['departures'])}):\n"
             for f in data["departures"][:5]:
                 text += f"  {f['callsign']} → {f['arrival']}\n"
@@ -7227,7 +7247,7 @@ async def cmd_flight(message: Message, lang: str = "en") -> None:
             if data.get("error"):
                 await message.answer(t("not_found", lang))
                 return
-            text = f"✈️ **{data['callsign']}**\n\n"
+            text = f"✈️ *{data['callsign']}*\n\n"
             text += f"🌍 {data.get('origin_country', 'N/A')}\n"
             text += f"📍 {data.get('latitude', 0):.2f}, {data.get('longitude', 0):.2f}\n"
             text += f"{t('label_altitude', lang)}: {data.get('altitude', 0):,.0f}m\n"
