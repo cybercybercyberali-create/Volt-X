@@ -370,33 +370,63 @@ class OmegaFootball:
         return {"error": True}
 
     async def get_league_teams(self, league_code: str) -> list[dict]:
-        """Return sorted [{id, name}] for all teams seen in ±8 days of league fixtures."""
+        """Return sorted [{id, name}] for a league via standings, fallback to day-scan."""
         sf_id = _SF_TOURNAMENT_IDS.get(league_code.upper())
+        if not sf_id:
+            return []
         cache_key = f"sfsc:league_teams:{league_code.upper()}"
         cached = await cache.get(cache_key)
         if cached is not None:
             return cached
 
-        from datetime import date, timedelta
-        today = date.today()
-        teams: dict[int, str] = {}
+        teams: list[dict] = []
+        try:
+            async with httpx.AsyncClient(timeout=12, follow_redirects=True) as client:
+                # Step 1: get latest season ID
+                r = await client.get(
+                    f"https://api.sofascore.com/api/v1/unique-tournament/{sf_id}/seasons",
+                    headers=_SF_HEADERS,
+                )
+                if r.status_code == 200:
+                    seasons = r.json().get("seasons", [])
+                    if seasons:
+                        season_id = seasons[0]["id"]
+                        # Step 2: standings → full team list
+                        r2 = await client.get(
+                            f"https://api.sofascore.com/api/v1/unique-tournament/{sf_id}/season/{season_id}/standings/total",
+                            headers=_SF_HEADERS,
+                        )
+                        if r2.status_code == 200:
+                            for group in r2.json().get("standings", []):
+                                for row in group.get("rows", []):
+                                    team = row.get("team", {})
+                                    tid, tname = team.get("id"), team.get("name", "")
+                                    if tid and tname:
+                                        teams.append({"id": tid, "name": tname})
+        except Exception as exc:
+            logger.warning(f"Sofascore standings for {league_code}: {exc}")
 
-        for delta in range(-4, 9):
-            day = (today + timedelta(days=delta)).strftime("%Y-%m-%d")
-            events = await self._sofascore_raw_day(day)
-            for ev in events:
-                if sf_id and ev.get("tournament", {}).get("id") != sf_id:
-                    continue
-                for side in ("homeTeam", "awayTeam"):
-                    team = ev.get(side, {})
-                    tid, tname = team.get("id"), team.get("name", "")
-                    if tid and tname:
-                        teams[tid] = tname
+        # Fallback: scan ±21 days of fixtures
+        if not teams:
+            from datetime import date, timedelta
+            today = date.today()
+            team_dict: dict[int, str] = {}
+            for delta in range(-14, 22):
+                day = (today + timedelta(days=delta)).strftime("%Y-%m-%d")
+                events = await self._sofascore_raw_day(day)
+                for ev in events:
+                    if ev.get("tournament", {}).get("id") != sf_id:
+                        continue
+                    for side in ("homeTeam", "awayTeam"):
+                        t = ev.get(side, {})
+                        tid, tname = t.get("id"), t.get("name", "")
+                        if tid and tname:
+                            team_dict[tid] = tname
+            teams = sorted([{"id": k, "name": v} for k, v in team_dict.items()], key=lambda x: x["name"])
 
-        result = sorted([{"id": k, "name": v} for k, v in teams.items()], key=lambda x: x["name"])
-        if result:
-            await cache.set(cache_key, result, ttl=3600 * 12)
-        return result
+        if teams:
+            await cache.set(cache_key, teams, ttl=3600 * 24)
+        return teams
 
     async def get_team_schedule(self, team_id: int) -> dict:
         """Fetch last-5 + next-5 matches for a team from Sofascore."""
@@ -424,7 +454,7 @@ class OmegaFootball:
                 logger.warning(f"Sofascore team {path}: {exc}")
 
         # most recent first; cap at 5
-        past = list(reversed(past[-5:]))
+        past = past[:5]   # events/last/0 returns most-recent first
         live     = [f for f in upcoming_raw if f["status"] not in ("NS", "TBD", "PST", "CANC")]
         upcoming = [f for f in upcoming_raw if f["status"] in ("NS", "TBD")][:5]
 

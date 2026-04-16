@@ -1,7 +1,7 @@
 import logging
 import re
 from aiogram import Router
-from aiogram.types import Message
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 
 from api_clients.omega_currency import omega_currency
@@ -161,6 +161,23 @@ async def _send_pair(message: Message, base: str, target: str,
     await message.answer(header + body + stale, parse_mode="Markdown")
 
 
+_QUICK_PAIRS = [
+    ("USD", "LBP"), ("USD", "EUR"), ("USD", "GBP"),
+    ("USD", "TRY"), ("USD", "EGP"), ("EUR", "USD"),
+    ("USD", "SAR"), ("USD", "AED"),
+]
+
+
+def _currency_quick_kb() -> InlineKeyboardMarkup:
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    btns = [
+        InlineKeyboardButton(text=f"{b}→{t}", callback_data=f"cur_q:{b}:{t}")
+        for b, t in _QUICK_PAIRS
+    ]
+    rows = [btns[i:i+4] for i in range(0, len(btns), 4)]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 @router.message(Command("currency"))
 async def cmd_currency(message: Message, lang: str = "en") -> None:
     raw = message.text or ""
@@ -187,7 +204,23 @@ async def cmd_currency(message: Message, lang: str = "en") -> None:
         await _send_pair(message, parsed["base"], parsed["target"],
                          parsed["amount"], lang)
     else:
-        await _send_multi(message, "USD", lang)
+        # Button tap with no specific pair — show prompt + quick-select keyboard
+        hint = (
+            "💱 *تحويل العملات*\n\n"
+            "اكتب مثال:\n"
+            "  `100 دولار بيورو`\n"
+            "  `USD EUR`\n"
+            "  `كم يساوي الدولار بالليرة`\n\n"
+            "أو اختر زوجاً سريعاً:"
+            if lang == "ar"
+            else
+            "💱 *Currency Converter*\n\n"
+            "Type e.g.:\n"
+            "  `100 USD to EUR`\n"
+            "  `euro to lira`\n\n"
+            "Or pick a quick pair:"
+        )
+        await message.answer(hint, parse_mode="Markdown", reply_markup=_currency_quick_kb())
 
 
 async def _send_multi(message: Message, base: str, lang: str) -> None:
@@ -219,6 +252,16 @@ async def _send_multi(message: Message, base: str, lang: str) -> None:
     if any_stale:
         text += _stale_note(lang)
     await message.answer(text, parse_mode="Markdown")
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("cur_q:"))
+async def handle_cur_quick_cb(callback: CallbackQuery, lang: str = "en") -> None:
+    await callback.answer()
+    parts = callback.data.split(":")
+    if len(parts) < 3:
+        return
+    base, target = parts[1], parts[2]
+    await _send_pair(callback.message, base, target, 1.0, lang)
 
 
 def register_currency_handlers(dp) -> None:

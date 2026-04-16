@@ -1,7 +1,7 @@
 import logging
 import httpx
 from aiogram import Router
-from aiogram.types import Message
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 
 from api_clients.omega_fuel import omega_fuel
@@ -112,15 +112,43 @@ async def _fetch_exchange_rate() -> float:
     return _FALLBACK_RATE
 
 
+# ── Country selector ──────────────────────────────────────────────────────────
+_FUEL_COUNTRIES = [
+    ("🇱🇧 لبنان",      "LB"), ("🇸🇦 السعودية",  "SA"), ("🇦🇪 الإمارات",  "AE"),
+    ("🇪🇬 مصر",        "EG"), ("🇰🇼 الكويت",    "KW"), ("🇶🇦 قطر",       "QA"),
+    ("🇯🇴 الأردن",     "JO"), ("🇮🇶 العراق",    "IQ"), ("🇩🇿 الجزائر",   "DZ"),
+    ("🇲🇦 المغرب",     "MA"), ("🇹🇳 تونس",      "TN"), ("🇹🇷 تركيا",     "TR"),
+    ("🇺🇸 USA",        "US"), ("🇩🇪 Germany",   "DE"), ("🇫🇷 France",    "FR"),
+    ("🇬🇧 UK",         "GB"), ("🇯🇵 Japan",     "JP"), ("🇮🇳 India",     "IN"),
+    ("🇧🇷 Brazil",     "BR"), ("🇷🇺 Russia",    "RU"), ("🇨🇳 China",     "CN"),
+]
+
+
+def _fuel_country_kb(lang: str = "ar") -> InlineKeyboardMarkup:
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    btns = [
+        InlineKeyboardButton(text=name, callback_data=f"fuel_c:{code}")
+        for name, code in _FUEL_COUNTRIES
+    ]
+    rows = [btns[i:i+3] for i in range(0, len(btns), 3)]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 @router.message(Command("fuel"))
 async def cmd_fuel(message: Message, lang: str = "en") -> None:
     args = message.text.split()[1:] if message.text else []
     # Only accept a valid 2-letter country code; ignore natural language words
-    country = "LB"
+    country = None
     if args:
         candidate = args[0].upper()
         if len(candidate) == 2 and candidate.isalpha():
             country = candidate
+
+    # No country specified → show selector keyboard
+    if not country:
+        prompt = "⛽ *اختر الدولة:*" if lang == "ar" else "⛽ *Select a country:*"
+        await message.answer(prompt, parse_mode="Markdown", reply_markup=_fuel_country_kb(lang))
+        return
 
     await message.answer(t("fetching", lang))
     try:
@@ -208,6 +236,18 @@ async def cmd_fuel(message: Message, lang: str = "en") -> None:
     except Exception as exc:
         logger.error(f"Fuel error: {exc}", exc_info=True)
         await message.answer(t("error", lang))
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("fuel_c:"))
+async def handle_fuel_country_cb(callback: CallbackQuery, lang: str = "en") -> None:
+    await callback.answer("⏳")
+    country = callback.data.split(":", 1)[1].upper()
+    # Simulate a /fuel {country} message by calling the same logic
+    # Patch message.text so cmd_fuel parses the country
+    original_text = callback.message.text or ""
+    callback.message.text = f"/fuel {country}"
+    await cmd_fuel(callback.message, lang=lang)
+    callback.message.text = original_text
 
 
 def register_fuel_handlers(dp) -> None:

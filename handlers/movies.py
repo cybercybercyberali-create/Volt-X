@@ -73,11 +73,17 @@ async def cmd_movie(message: Message, lang: str = "en") -> None:
             break
 
     if not raw:
+        hint = (
+            "🎬 *أرسل اسم الفيلم للبحث*\n\nمثال: `باتمان` أو `Inception 2010`\n\n🔥 *الأكثر مشاهدة الآن:*"
+            if lang == "ar"
+            else "🎬 *Send a movie name to search*\n\nExample: `Batman` or `Inception 2010`\n\n🔥 *Trending Now:*"
+        )
+        await message.answer(hint, parse_mode="Markdown")
         data = await omega_movies.get_trending()
         if data.get("error") or not data.get("results"):
             await message.answer(t("error", lang))
             return
-        for item in data["results"][:5]:
+        for item in data["results"][:3]:
             await _send_card(message, item, lang)
         return
 
