@@ -4237,6 +4237,26 @@ ARAB_FUEL_SOURCES = {
     "SD": {"name_ar": "السودان", "name_en": "Sudan", "types": ["benzin", "diesel", "gas"]},
 }
 
+_GPP_NAME_TO_CODE: dict[str, str] = {
+    "Saudi Arabia": "SA", "United Arab Emirates": "AE", "Egypt": "EG",
+    "Kuwait": "KW", "Qatar": "QA", "Bahrain": "BH", "Oman": "OM",
+    "Jordan": "JO", "Iraq": "IQ", "Algeria": "DZ", "Morocco": "MA",
+    "Tunisia": "TN", "Libya": "LY", "Yemen": "YE", "Syria": "SY",
+    "Turkey": "TR", "United States": "US", "Germany": "DE", "France": "FR",
+    "United Kingdom": "GB", "Japan": "JP", "India": "IN", "Brazil": "BR",
+    "Russia": "RU", "China": "CN", "Pakistan": "PK",
+}
+
+_GPP_BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
 
 class OmegaFuel:
     """Fuel prices with per-country sources and scraping."""
@@ -4458,101 +4478,91 @@ class OmegaFuel:
 
         return None
 
-    async def _get_global_prices(self, country_code: str) -> dict[str, Any]:
-        """Get fuel prices from GlobalPetrolPrices.com, falling back to static data."""
-        import re as _re
+    async def _fetch_gpp_all(self) -> dict[str, dict]:
+        """
+        Scrape the GlobalPetrolPrices main listing pages (gasoline + diesel)
+        which list ALL countries in one table — far more reliable than per-country pages.
+        Cached 12 hours.
+        """
+        cache_key = "gpp:listing"
+        cached = await cache.get(cache_key)
+        if cached:
+            return cached
 
+        import re as _re
+        from bs4 import BeautifulSoup
+
+        result: dict[str, dict] = {}
+
+        for fuel_key, url_path in [("gasoline", "gasoline_prices"), ("diesel", "diesel_prices")]:
+            url = f"https://www.globalpetrolprices.com/{url_path}/"
+            try:
+                html = await self._scraper.fetch_html(url, headers=_GPP_BROWSER_HEADERS)
+                if not html or len(html) < 2000:
+                    continue
+                soup = BeautifulSoup(html, "lxml")
+                for row in soup.find_all("tr"):
+                    cells = row.find_all("td")
+                    if len(cells) < 2:
+                        continue
+                    country_text = cells[0].get_text(strip=True)
+                    code = _GPP_NAME_TO_CODE.get(country_text)
+                    if not code:
+                        continue
+                    for cell in cells[1:5]:
+                        txt = cell.get_text(strip=True).replace(",", ".")
+                        m = _re.search(r'\b(\d+\.\d{2,4})\b', txt)
+                        if m:
+                            val = float(m.group(1))
+                            if 0.01 < val < 10.0:
+                                result.setdefault(code, {})
+                                label = "Gasoline" if fuel_key == "gasoline" else "Diesel"
+                                result[code][label] = f"{val:.3f} USD/L"
+                                break
+            except Exception as exc:
+                logger.debug(f"_fetch_gpp_all {fuel_key}: {exc}")
+
+        if result:
+            await cache.set(cache_key, result, ttl=3600 * 12)
+        return result
+
+    async def _get_global_prices(self, country_code: str) -> dict[str, Any]:
+        """Get fuel prices: tries GPP listing page first, then static fallback."""
         if country_code in ARAB_FUEL_SOURCES:
             name_ar = ARAB_FUEL_SOURCES[country_code]["name_ar"]
             name_en = ARAB_FUEL_SOURCES[country_code]["name_en"]
         else:
             name_ar, name_en = _COUNTRY_NAMES.get(country_code, (country_code, country_code))
 
-        country_map = {
-            "US": "USA", "GB": "United-Kingdom", "DE": "Germany",
-            "FR": "France", "JP": "Japan", "CN": "China",
-            "IN": "India", "BR": "Brazil", "RU": "Russia",
-            "LB": "Lebanon", "SA": "Saudi-Arabia", "AE": "United-Arab-Emirates",
-            "EG": "Egypt", "KW": "Kuwait", "QA": "Qatar", "BH": "Bahrain",
-            "OM": "Oman", "JO": "Jordan", "IQ": "Iraq", "SY": "Syria",
-            "DZ": "Algeria", "MA": "Morocco", "TN": "Tunisia",
-            "LY": "Libya", "YE": "Yemen", "SD": "Sudan",
-            "TR": "Turkey", "PK": "Pakistan", "NG": "Nigeria",
-        }
-        _SKIP_ROWS = {
-            "correlation", "flexibility", "index", "tax", "vat", "subsidy",
-            "margin", "volatility", "trend", "rank", "rate", "change", "percent",
-        }
-        prices: dict[str, str] = {}
-        country_name = country_map.get(country_code, country_code)
-
-        for fuel_path in ("gasoline_prices", "diesel_prices"):
-            url = f"https://www.globalpetrolprices.com/{country_name}/{fuel_path}/"
-            try:
-                html = await self._scraper.fetch_html(url)
-                if not html:
-                    continue
-                from bs4 import BeautifulSoup
-                soup = BeautifulSoup(html, "lxml")
-                for row in soup.find_all("tr"):
-                    cells = row.find_all("td")
-                    if len(cells) < 2:
-                        continue
-                    fuel_name = cells[0].get_text(strip=True)
-                    if not fuel_name or len(fuel_name) < 2:
-                        continue
-                    if any(skip in fuel_name.lower() for skip in _SKIP_ROWS):
-                        continue
-                    for cell in cells[1:4]:
-                        cell_text = cell.get_text(strip=True).replace(",", ".")
-                        m = _re.search(r'\b(\d+\.\d{2,4})\b', cell_text)
-                        if m:
-                            try:
-                                val = float(m.group(1))
-                                if 0.05 < val < 10.0:
-                                    prices[fuel_name] = f"{val:.3f} USD/L"
-                                    break
-                            except ValueError:
-                                pass
-                if not prices:
-                    plain = soup.get_text(" ")
-                    for m in _re.finditer(r'(\d+\.\d{3})\s*USD', plain):
-                        val = float(m.group(1))
-                        if 0.05 < val < 10.0:
-                            label = "Gasoline" if fuel_path == "gasoline_prices" else "Diesel"
-                            prices[label] = f"{val:.3f} USD/L"
-                            break
-            except Exception as exc:
-                logger.debug(f"GPP {fuel_path} error for {country_code}: {exc}")
-
-        if prices:
+        all_prices = await self._fetch_gpp_all()
+        if country_code in all_prices:
             return {
-                "country_code": country_code,
+                "country_code":    country_code,
                 "country_name_ar": name_ar,
                 "country_name_en": name_en,
-                "prices": prices,
-                "source": "GlobalPetrolPrices",
-                "error": False,
+                "prices":          all_prices[country_code],
+                "source":          "GlobalPetrolPrices",
+                "error":           False,
             }
 
         static = _STATIC_FUEL_PRICES.get(country_code)
         if static:
             return {
-                "country_code": country_code,
+                "country_code":    country_code,
                 "country_name_ar": name_ar,
                 "country_name_en": name_en,
-                "prices": static,
-                "source": "static",
-                "stale": True,
-                "error": False,
+                "prices":          static,
+                "source":          "static",
+                "stale":           True,
+                "error":           False,
             }
 
         return {
-            "country_code": country_code,
+            "country_code":    country_code,
             "country_name_ar": name_ar,
             "country_name_en": name_en,
-            "prices": {},
-            "error": True,
+            "prices":          {},
+            "error":           True,
         }
 
     async def get_arab_summary(self) -> dict[str, Any]:
