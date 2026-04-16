@@ -229,7 +229,7 @@ CACHE_TTL = {
     "gold": 300,
     "currency": 600,
     "lbp_rate": 900,
-    "weather_current": 1800,
+    "weather_current": 600,
     "weather_forecast": 3600,
     "football_static": 3600,
     "football_live": 60,

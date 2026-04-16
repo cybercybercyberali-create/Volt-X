@@ -112,45 +112,73 @@ def fuel_card(
 
 def weather_card(data: dict, lang: str) -> str:
     """Format weather data into a visual card."""
-    city = data.get("city", "")
-    country = data.get("country", "")
-    temp = data.get("temperature", "N/A")
-    feels = data.get("feels_like", "N/A")
-    humidity = data.get("humidity", "N/A")
-    wind = data.get("wind_speed", "N/A")
-    wind_dir = data.get("wind_direction", "")
-    sunrise = data.get("sunrise", "")
-    sunset = data.get("sunset", "")
+    from datetime import datetime as _dt
+    city        = data.get("city", "")
+    country     = data.get("country", "")
+    temp        = data.get("temperature", "N/A")
+    feels       = data.get("feels_like", "N/A")
+    humidity    = data.get("humidity", "N/A")
+    wind        = data.get("wind_speed", "N/A")
+    wind_dir    = data.get("wind_direction", "")
+    precip      = data.get("precipitation")
+    sunrise     = data.get("sunrise", "")
+    sunset      = data.get("sunset", "")
     description = data.get("description", "")
+    observed_at = data.get("observed_at", "")
+    is_stale    = data.get("stale", False)
 
-    sep = _sep()
+    # Format observation timestamp → "HH:MM"
+    obs_str = ""
+    if observed_at:
+        try:
+            obs_str = _dt.fromisoformat(observed_at.replace("Z", "+00:00")).strftime("%H:%M")
+        except Exception:
+            obs_str = observed_at[:16] if len(observed_at) >= 16 else observed_at
+
+    sep      = _sep()
+    location = f"{city}, {country}" if country else city
+
+    # Wind direction: convert degrees to compass label
+    def _compass(deg) -> str:
+        try:
+            d = float(deg)
+            dirs = ["N","NE","E","SE","S","SW","W","NW"]
+            return dirs[int((d + 22.5) / 45) % 8]
+        except Exception:
+            return str(deg) if deg else ""
+
+    wind_label = _compass(wind_dir) if wind_dir else ""
 
     if lang == "ar":
-        location = f"{city}, {country}" if country else city
         lines = [
-            f"🌤 *{location}*",
+            f"{description or '🌤'} *{location}*",
             sep,
-            f"🌡 درجة الحرارة: *{temp}°C* (يُحسّ كـ {feels}°C)",
-            f"💧 الرطوبة: *{humidity}%*",
-            f"💨 الرياح: *{wind} كم/س* {wind_dir}",
+            f"🌡 *{temp}°C*  •  يُحسّ كـ {feels}°C",
+            f"💧 الرطوبة: {humidity}%   💨 الرياح: {wind} كم/س {wind_label}",
         ]
+        if precip is not None and float(precip) > 0:
+            lines.append(f"🌧 هطول: {precip} مم")
         if sunrise and sunset:
-            lines.append(f"🌅 الشروق: {sunrise} | الغروب: {sunset}")
-        if description:
-            lines.append(f"📊 الحالة: {description}")
+            lines.append(f"🌅 {sunrise}  |  🌇 {sunset}")
+        stale_note = " _(بيانات قديمة)_" if is_stale else ""
+        ts_line = f"🕐 آخر تحديث: {obs_str}{stale_note}" if obs_str else ("⚠️ _(بيانات قديمة)_" if is_stale else "")
+        if ts_line:
+            lines.append(ts_line)
     else:
-        location = f"{city}, {country}" if country else city
         lines = [
-            f"🌤 *{location}*",
+            f"{description or '🌤'} *{location}*",
             sep,
-            f"🌡 Temperature: *{temp}°C* (feels like {feels}°C)",
-            f"💧 Humidity: *{humidity}%*",
-            f"💨 Wind: *{wind} km/h* {wind_dir}",
+            f"🌡 *{temp}°C*  •  feels like {feels}°C",
+            f"💧 Humidity: {humidity}%   💨 Wind: {wind} km/h {wind_label}",
         ]
+        if precip is not None and float(precip) > 0:
+            lines.append(f"🌧 Precipitation: {precip} mm")
         if sunrise and sunset:
-            lines.append(f"🌅 Sunrise: {sunrise} | Sunset: {sunset}")
-        if description:
-            lines.append(f"📊 Condition: {description}")
+            lines.append(f"🌅 {sunrise}  |  🌇 {sunset}")
+        stale_note = " _(stale)_" if is_stale else ""
+        ts_line = f"🕐 Updated: {obs_str}{stale_note}" if obs_str else ("⚠️ _(stale data)_" if is_stale else "")
+        if ts_line:
+            lines.append(ts_line)
 
     return "\n".join(lines)
 

@@ -540,6 +540,25 @@ class OmegaFootball:
         await cache.set(cache_key, result, ttl=60 if live else 300)
         return result
 
+    @staticmethod
+    def _name_matches(query: str, candidate: str) -> bool:
+        """Fuzzy team name match: handles accents, abbreviations, partial names."""
+        import unicodedata as _ud
+        def _norm(s: str) -> str:
+            s = _ud.normalize("NFD", s.lower())
+            return "".join(c for c in s if _ud.category(c) != "Mn")
+
+        q = _norm(query)
+        c = _norm(candidate)
+        if q == c or q in c or c in q:
+            return True
+        # Token overlap: ≥50% of query tokens found in candidate tokens
+        q_tokens = set(q.split())
+        c_tokens = set(c.split())
+        if q_tokens and len(q_tokens & c_tokens) / len(q_tokens) >= 0.5:
+            return True
+        return False
+
     async def get_team_schedule_by_name(self, team_name: str, league_code: str = "") -> dict:
         """Scan Sofascore daily events to build team schedule — no Sofascore team ID needed."""
         cache_key = f"sfsc:tsched_name:{league_code}:{team_name}"
@@ -550,7 +569,6 @@ class OmegaFootball:
         from datetime import date, timedelta
         today = date.today()
         sf_id = _SF_TOURNAMENT_IDS.get(league_code.upper()) if league_code else None
-        team_lower = team_name.lower()
 
         past: list[dict] = []
         upcoming: list[dict] = []
@@ -564,7 +582,7 @@ class OmegaFootball:
                     continue
                 home = ev.get("homeTeam", {}).get("name", "")
                 away = ev.get("awayTeam", {}).get("name", "")
-                if team_lower not in (home.lower(), away.lower()):
+                if not (self._name_matches(team_name, home) or self._name_matches(team_name, away)):
                     continue
                 n = _normalize_sofascore(ev)
                 if not n:

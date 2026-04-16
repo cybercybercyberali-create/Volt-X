@@ -156,6 +156,8 @@ class OmegaWeather:
             )
             if data and "current" in data:
                 current = data["current"]
+                # Open-Meteo gives the observation timestamp in current["time"]
+                obs_time = current.get("time", "")
                 return {
                     "temperature": current["temperature_2m"],
                     "feels_like": current["apparent_temperature"],
@@ -165,6 +167,7 @@ class OmegaWeather:
                     "wind_direction": current["winddirection_10m"],
                     "weather_code": current["weathercode"],
                     "description": self._weather_code_to_text(current["weathercode"], lang),
+                    "observed_at": obs_time,
                     "source": "Open-Meteo",
                     "error": False,
                 }

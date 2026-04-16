@@ -342,7 +342,7 @@ CACHE_TTL = {
     "gold": 300,
     "currency": 600,
     "lbp_rate": 900,
-    "weather_current": 1800,
+    "weather_current": 600,
     "weather_forecast": 3600,
     "football_static": 3600,
     "football_live": 60,
@@ -3174,45 +3174,71 @@ def fuel_card(
 
 def weather_card(data: dict, lang: str) -> str:
     """Format weather data into a visual card."""
-    city = data.get("city", "")
-    country = data.get("country", "")
-    temp = data.get("temperature", "N/A")
-    feels = data.get("feels_like", "N/A")
-    humidity = data.get("humidity", "N/A")
-    wind = data.get("wind_speed", "N/A")
-    wind_dir = data.get("wind_direction", "")
-    sunrise = data.get("sunrise", "")
-    sunset = data.get("sunset", "")
+    from datetime import datetime as _dt
+    city        = data.get("city", "")
+    country     = data.get("country", "")
+    temp        = data.get("temperature", "N/A")
+    feels       = data.get("feels_like", "N/A")
+    humidity    = data.get("humidity", "N/A")
+    wind        = data.get("wind_speed", "N/A")
+    wind_dir    = data.get("wind_direction", "")
+    precip      = data.get("precipitation")
+    sunrise     = data.get("sunrise", "")
+    sunset      = data.get("sunset", "")
     description = data.get("description", "")
+    observed_at = data.get("observed_at", "")
+    is_stale    = data.get("stale", False)
 
-    sep = _sep()
+    obs_str = ""
+    if observed_at:
+        try:
+            obs_str = _dt.fromisoformat(observed_at.replace("Z", "+00:00")).strftime("%H:%M")
+        except Exception:
+            obs_str = observed_at[:16] if len(observed_at) >= 16 else observed_at
+
+    sep      = _sep()
+    location = f"{city}, {country}" if country else city
+
+    def _compass(deg) -> str:
+        try:
+            d = float(deg)
+            dirs = ["N","NE","E","SE","S","SW","W","NW"]
+            return dirs[int((d + 22.5) / 45) % 8]
+        except Exception:
+            return str(deg) if deg else ""
+
+    wind_label = _compass(wind_dir) if wind_dir else ""
 
     if lang == "ar":
-        location = f"{city}, {country}" if country else city
         lines = [
-            f"🌤 *{location}*",
+            f"{description or '🌤'} *{location}*",
             sep,
-            f"🌡 درجة الحرارة: *{temp}°C* (يُحسّ كـ {feels}°C)",
-            f"💧 الرطوبة: *{humidity}%*",
-            f"💨 الرياح: *{wind} كم/س* {wind_dir}",
+            f"🌡 *{temp}°C*  •  يُحسّ كـ {feels}°C",
+            f"💧 الرطوبة: {humidity}%   💨 الرياح: {wind} كم/س {wind_label}",
         ]
+        if precip is not None and float(precip) > 0:
+            lines.append(f"🌧 هطول: {precip} مم")
         if sunrise and sunset:
-            lines.append(f"🌅 الشروق: {sunrise} | الغروب: {sunset}")
-        if description:
-            lines.append(f"📊 الحالة: {description}")
+            lines.append(f"🌅 {sunrise}  |  🌇 {sunset}")
+        stale_note = " _(بيانات قديمة)_" if is_stale else ""
+        ts_line = f"🕐 آخر تحديث: {obs_str}{stale_note}" if obs_str else ("⚠️ _(بيانات قديمة)_" if is_stale else "")
+        if ts_line:
+            lines.append(ts_line)
     else:
-        location = f"{city}, {country}" if country else city
         lines = [
-            f"🌤 *{location}*",
+            f"{description or '🌤'} *{location}*",
             sep,
-            f"🌡 Temperature: *{temp}°C* (feels like {feels}°C)",
-            f"💧 Humidity: *{humidity}%*",
-            f"💨 Wind: *{wind} km/h* {wind_dir}",
+            f"🌡 *{temp}°C*  •  feels like {feels}°C",
+            f"💧 Humidity: {humidity}%   💨 Wind: {wind} km/h {wind_label}",
         ]
+        if precip is not None and float(precip) > 0:
+            lines.append(f"🌧 Precipitation: {precip} mm")
         if sunrise and sunset:
-            lines.append(f"🌅 Sunrise: {sunrise} | Sunset: {sunset}")
-        if description:
-            lines.append(f"📊 Condition: {description}")
+            lines.append(f"🌅 {sunrise}  |  🌇 {sunset}")
+        stale_note = " _(stale)_" if is_stale else ""
+        ts_line = f"🕐 Updated: {obs_str}{stale_note}" if obs_str else ("⚠️ _(stale data)_" if is_stale else "")
+        if ts_line:
+            lines.append(ts_line)
 
     return "\n".join(lines)
 
@@ -4739,6 +4765,7 @@ class OmegaWeather:
             )
             if data and "current" in data:
                 current = data["current"]
+                obs_time = current.get("time", "")
                 return {
                     "temperature": current["temperature_2m"],
                     "feels_like": current["apparent_temperature"],
@@ -4748,6 +4775,7 @@ class OmegaWeather:
                     "wind_direction": current["winddirection_10m"],
                     "weather_code": current["weathercode"],
                     "description": self._weather_code_to_text(current["weathercode"], lang),
+                    "observed_at": obs_time,
                     "source": "Open-Meteo",
                     "error": False,
                 }
@@ -5364,6 +5392,24 @@ class OmegaFootball:
         await cache.set(cache_key, result, ttl=60 if live else 300)
         return result
 
+    @staticmethod
+    def _name_matches(query: str, candidate: str) -> bool:
+        """Fuzzy team name match: handles accents, abbreviations, partial names."""
+        import unicodedata as _ud
+        def _norm(s: str) -> str:
+            s = _ud.normalize("NFD", s.lower())
+            return "".join(c for c in s if _ud.category(c) != "Mn")
+
+        q = _norm(query)
+        c = _norm(candidate)
+        if q == c or q in c or c in q:
+            return True
+        q_tokens = set(q.split())
+        c_tokens = set(c.split())
+        if q_tokens and len(q_tokens & c_tokens) / len(q_tokens) >= 0.5:
+            return True
+        return False
+
     async def get_team_schedule_by_name(self, team_name: str, league_code: str = "") -> dict:
         """Scan Sofascore daily events to build team schedule — no Sofascore team ID needed."""
         cache_key = f"sfsc:tsched_name:{league_code}:{team_name}"
@@ -5374,7 +5420,6 @@ class OmegaFootball:
         from datetime import date, timedelta
         today = date.today()
         sf_id = _SF_TOURNAMENT_IDS.get(league_code.upper()) if league_code else None
-        team_lower = team_name.lower()
 
         past: list[dict] = []
         upcoming: list[dict] = []
@@ -5388,7 +5433,7 @@ class OmegaFootball:
                     continue
                 home = ev.get("homeTeam", {}).get("name", "")
                 away = ev.get("awayTeam", {}).get("name", "")
-                if team_lower not in (home.lower(), away.lower()):
+                if not (self._name_matches(team_name, home) or self._name_matches(team_name, away)):
                     continue
                 n = _normalize_sofascore(ev)
                 if not n:
