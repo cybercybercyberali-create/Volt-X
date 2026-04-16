@@ -4180,6 +4180,42 @@ from services.cache_service import cache
 
 logger = logging.getLogger(__name__)
 
+_COUNTRY_NAMES: dict[str, tuple[str, str]] = {
+    "US": ("الولايات المتحدة", "USA"),
+    "DE": ("ألمانيا",          "Germany"),
+    "FR": ("فرنسا",            "France"),
+    "GB": ("المملكة المتحدة",  "UK"),
+    "JP": ("اليابان",          "Japan"),
+    "CN": ("الصين",            "China"),
+    "IN": ("الهند",            "India"),
+    "BR": ("البرازيل",         "Brazil"),
+    "RU": ("روسيا",            "Russia"),
+    "TR": ("تركيا",            "Turkey"),
+}
+
+_STATIC_FUEL_PRICES: dict[str, dict] = {
+    "SA": {"بنزين 91": "0.175 USD/L", "بنزين 95": "0.209 USD/L", "ديزل": "0.209 USD/L"},
+    "AE": {"بنزين 95": "0.645 USD/L", "بنزين 98": "0.704 USD/L", "ديزل": "0.640 USD/L"},
+    "EG": {"بنزين 80": "0.270 USD/L", "بنزين 92": "0.350 USD/L", "بنزين 95": "0.440 USD/L", "ديزل": "0.250 USD/L"},
+    "KW": {"بنزين 91": "0.272 USD/L", "بنزين 95": "0.300 USD/L", "ديزل": "0.280 USD/L"},
+    "QA": {"بنزين 91": "0.449 USD/L", "بنزين 95": "0.461 USD/L", "ديزل": "0.449 USD/L"},
+    "JO": {"بنزين 90": "1.110 USD/L", "بنزين 95": "1.230 USD/L", "ديزل": "1.050 USD/L"},
+    "IQ": {"بنزين":    "0.530 USD/L", "ديزل":     "0.550 USD/L"},
+    "DZ": {"بنزين":    "0.323 USD/L", "ديزل":     "0.207 USD/L"},
+    "MA": {"بنزين 95": "1.230 USD/L", "ديزل":     "1.010 USD/L"},
+    "TN": {"بنزين 91": "0.820 USD/L", "بنزين 95": "0.900 USD/L", "ديزل": "0.690 USD/L"},
+    "TR": {"بنزين 95": "1.450 USD/L", "ديزل":     "1.400 USD/L"},
+    "US": {"Gasoline (Regular)": "0.900 USD/L", "Diesel": "0.970 USD/L"},
+    "DE": {"Super 95":           "1.740 USD/L", "Diesel": "1.620 USD/L"},
+    "FR": {"SP95":               "1.700 USD/L", "Diesel": "1.570 USD/L"},
+    "GB": {"Petrol E10":         "1.640 USD/L", "Diesel": "1.660 USD/L"},
+    "JP": {"Regular":            "1.200 USD/L", "Diesel": "1.100 USD/L"},
+    "IN": {"Petrol":             "1.150 USD/L", "Diesel": "0.990 USD/L"},
+    "BR": {"Gasoline":           "1.310 USD/L", "Diesel": "1.100 USD/L"},
+    "RU": {"AI-95":              "0.570 USD/L", "Diesel": "0.540 USD/L"},
+    "CN": {"No. 92":             "1.050 USD/L", "Diesel": "0.990 USD/L"},
+}
+
 ARAB_FUEL_SOURCES = {
     "LB": {"name_ar": "لبنان", "name_en": "Lebanon", "types": ["benzin95", "benzin98", "diesel", "gas10kg", "gas12kg", "gas50kg"]},
     "SA": {"name_ar": "السعودية", "name_en": "Saudi Arabia", "types": ["benzin91", "benzin95", "diesel"]},
@@ -4251,8 +4287,14 @@ class OmegaFuel:
         global_prices = await self._get_global_prices(country_code)
         if global_prices and not global_prices.get("error"):
             result["prices"] = global_prices.get("prices", {})
+            result["stale"]  = global_prices.get("stale", False)
         else:
-            result["prices"] = {"note": "Data temporarily unavailable"}
+            static = _STATIC_FUEL_PRICES.get(country_code)
+            if static:
+                result["prices"] = static
+                result["stale"]  = True
+            else:
+                result["error"] = True
 
         return result
 
@@ -4417,33 +4459,41 @@ class OmegaFuel:
         return None
 
     async def _get_global_prices(self, country_code: str) -> dict[str, Any]:
-        """Get fuel prices from GlobalPetrolPrices.com."""
-        try:
-            country_map = {
-                "US": "USA", "GB": "United-Kingdom", "DE": "Germany",
-                "FR": "France", "JP": "Japan", "CN": "China",
-                "IN": "India", "BR": "Brazil", "RU": "Russia",
-                "LB": "Lebanon", "SA": "Saudi-Arabia", "AE": "United-Arab-Emirates",
-                "EG": "Egypt", "KW": "Kuwait", "QA": "Qatar", "BH": "Bahrain",
-                "OM": "Oman", "JO": "Jordan", "IQ": "Iraq", "SY": "Syria",
-                "DZ": "Algeria", "MA": "Morocco", "TN": "Tunisia",
-                "LY": "Libya", "YE": "Yemen", "SD": "Sudan",
-                "TR": "Turkey", "PK": "Pakistan", "NG": "Nigeria",
-            }
-            country_name = country_map.get(country_code, country_code)
-            url = f"https://www.globalpetrolprices.com/{country_name}/gasoline_prices/"
-            html = await self._scraper.fetch_html(url)
+        """Get fuel prices from GlobalPetrolPrices.com, falling back to static data."""
+        import re as _re
 
-            if html:
-                import re as _re
+        if country_code in ARAB_FUEL_SOURCES:
+            name_ar = ARAB_FUEL_SOURCES[country_code]["name_ar"]
+            name_en = ARAB_FUEL_SOURCES[country_code]["name_en"]
+        else:
+            name_ar, name_en = _COUNTRY_NAMES.get(country_code, (country_code, country_code))
+
+        country_map = {
+            "US": "USA", "GB": "United-Kingdom", "DE": "Germany",
+            "FR": "France", "JP": "Japan", "CN": "China",
+            "IN": "India", "BR": "Brazil", "RU": "Russia",
+            "LB": "Lebanon", "SA": "Saudi-Arabia", "AE": "United-Arab-Emirates",
+            "EG": "Egypt", "KW": "Kuwait", "QA": "Qatar", "BH": "Bahrain",
+            "OM": "Oman", "JO": "Jordan", "IQ": "Iraq", "SY": "Syria",
+            "DZ": "Algeria", "MA": "Morocco", "TN": "Tunisia",
+            "LY": "Libya", "YE": "Yemen", "SD": "Sudan",
+            "TR": "Turkey", "PK": "Pakistan", "NG": "Nigeria",
+        }
+        _SKIP_ROWS = {
+            "correlation", "flexibility", "index", "tax", "vat", "subsidy",
+            "margin", "volatility", "trend", "rank", "rate", "change", "percent",
+        }
+        prices: dict[str, str] = {}
+        country_name = country_map.get(country_code, country_code)
+
+        for fuel_path in ("gasoline_prices", "diesel_prices"):
+            url = f"https://www.globalpetrolprices.com/{country_name}/{fuel_path}/"
+            try:
+                html = await self._scraper.fetch_html(url)
+                if not html:
+                    continue
                 from bs4 import BeautifulSoup
                 soup = BeautifulSoup(html, "lxml")
-                prices = {}
-                # Only accept rows whose first cell looks like a fuel type name
-                _SKIP_ROWS = {
-                    "correlation", "flexibility", "index", "tax", "vat", "subsidy",
-                    "margin", "volatility", "trend", "rank", "rate", "change", "percent",
-                }
                 for row in soup.find_all("tr"):
                     cells = row.find_all("td")
                     if len(cells) < 2:
@@ -4451,30 +4501,59 @@ class OmegaFuel:
                     fuel_name = cells[0].get_text(strip=True)
                     if not fuel_name or len(fuel_name) < 2:
                         continue
-                    # Skip non-price metadata rows
                     if any(skip in fuel_name.lower() for skip in _SKIP_ROWS):
                         continue
-                    # Only accept the FIRST numeric cell per row (current price)
-                    first_cell_text = cells[1].get_text(strip=True) if len(cells) > 1 else ""
-                    m = _re.match(r'^(\d+\.\d{2,4})$', first_cell_text.strip())
-                    if m:
-                        try:
-                            val = float(m.group(1))
-                            if 0.1 < val < 5.0:  # sane USD/L range
-                                prices[fuel_name] = f"{val:.3f} USD/L"
-                        except ValueError:
-                            pass
+                    for cell in cells[1:4]:
+                        cell_text = cell.get_text(strip=True).replace(",", ".")
+                        m = _re.search(r'\b(\d+\.\d{2,4})\b', cell_text)
+                        if m:
+                            try:
+                                val = float(m.group(1))
+                                if 0.05 < val < 10.0:
+                                    prices[fuel_name] = f"{val:.3f} USD/L"
+                                    break
+                            except ValueError:
+                                pass
+                if not prices:
+                    plain = soup.get_text(" ")
+                    for m in _re.finditer(r'(\d+\.\d{3})\s*USD', plain):
+                        val = float(m.group(1))
+                        if 0.05 < val < 10.0:
+                            label = "Gasoline" if fuel_path == "gasoline_prices" else "Diesel"
+                            prices[label] = f"{val:.3f} USD/L"
+                            break
+            except Exception as exc:
+                logger.debug(f"GPP {fuel_path} error for {country_code}: {exc}")
 
-                return {
-                    "country_code": country_code,
-                    "prices": prices if prices else {"note": "Prices not available"},
-                    "source": "GlobalPetrolPrices",
-                    "error": not bool(prices),
-                }
-        except Exception as exc:
-            logger.debug(f"Global fuel prices error for {country_code}: {exc}")
+        if prices:
+            return {
+                "country_code": country_code,
+                "country_name_ar": name_ar,
+                "country_name_en": name_en,
+                "prices": prices,
+                "source": "GlobalPetrolPrices",
+                "error": False,
+            }
 
-        return {"country_code": country_code, "prices": {}, "error": True, "message": "Data unavailable"}
+        static = _STATIC_FUEL_PRICES.get(country_code)
+        if static:
+            return {
+                "country_code": country_code,
+                "country_name_ar": name_ar,
+                "country_name_en": name_en,
+                "prices": static,
+                "source": "static",
+                "stale": True,
+                "error": False,
+            }
+
+        return {
+            "country_code": country_code,
+            "country_name_ar": name_ar,
+            "country_name_en": name_en,
+            "prices": {},
+            "error": True,
+        }
 
     async def get_arab_summary(self) -> dict[str, Any]:
         """Get summary of fuel prices for all Arab countries."""
@@ -4906,13 +4985,22 @@ class OmegaFootball:
                 await cache.set(cache_key, fd_fixtures, ttl=ttl)
                 return fd_fixtures
 
-        # Source 3 — Sofascore (no key, always free)
+        # Source 3 — Sofascore (no key, always free) — filter strictly by this league
+        sf_id    = _SF_TOURNAMENT_IDS.get(league_code_up)
+        league_ar_name = MAJOR_LEAGUES.get(league_code_up, {}).get("name_ar", "")
         all_fixtures: list[dict] = []
-        for delta in (0, -1, 1, -2, 2):
-            d = (today + timedelta(days=delta)).strftime("%Y-%m-%d")
-            result = await self._sofascore_scheduled(d)
-            if isinstance(result, list):
-                all_fixtures.extend(result)
+        if sf_id:
+            for delta in (0, -1, 1, -2, 2, 3):
+                d = (today + timedelta(days=delta)).strftime("%Y-%m-%d")
+                events = await self._sofascore_raw_day(d)
+                for ev in events:
+                    if ev.get("tournament", {}).get("id") != sf_id:
+                        continue
+                    n = _normalize_sofascore(ev)
+                    if n:
+                        if league_ar_name:
+                            n["league_ar"] = league_ar_name
+                        all_fixtures.append(n)
         if all_fixtures:
             await cache.set(cache_key, all_fixtures, ttl=ttl)
             return all_fixtures
@@ -5097,7 +5185,9 @@ class OmegaFootball:
         if events:
             _SF_LEAGUE_IDS = set(_SF_TOURNAMENT_IDS.values())
             filtered = [e for e in events if e.get("tournament", {}).get("id") in _SF_LEAGUE_IDS]
-            fixtures = [_normalize_sofascore(e) for e in (filtered or events)[:20]]
+            if not filtered:
+                return {"error": True}
+            fixtures = [_normalize_sofascore(e) for e in filtered[:20]]
             fixtures = [f for f in fixtures if f]
             if fixtures:
                 await cache.set(cache_key, fixtures, ttl=CACHE_TTL.get("football_static", 3600))
@@ -7198,6 +7288,12 @@ async def _show_fuel(send_to: Message, country: str, lang: str) -> None:
             for fuel_type, price in prices.items():
                 if fuel_type != "note":
                     text += f"  🔹 {fuel_type}: {price}\n"
+        if data.get("stale"):
+            text += (
+                "\n⚠️ _آخر بيانات معروفة — أبريل 2026_"
+                if lang == "ar"
+                else "\n⚠️ _Last known data — April 2026_"
+            )
         if data.get("note"):
             text += f"\n{t('label_note', lang)}: {data['note']}"
         await send_to.answer(text, parse_mode="Markdown")
@@ -7353,14 +7449,20 @@ def _status_line(f: dict, lang: str = "ar") -> str:
 
 
 def _card(f: dict, lang: str = "ar") -> str:
+    dt     = _fmt_full(f.get("date_utc", ""), lang)
+    score  = _score_display(f)
+    status = _status_line(f, lang)
+    venue  = f.get("venue") or "—"
     return (
-        f"⚽ {f['league_ar']}\n\n"
-        f"{f['home']}\n"
-        f"{_score_display(f)}\n"
-        f"{f['away']}\n\n"
-        f"{_status_line(f, lang)}\n"
-        f"🏟️ {f.get('venue') or '—'}\n"
-        f"🕙 {_fmt_local(f.get('date_utc', ''))} (Beirut)"
+        f"⚽ *{f['league_ar']}*\n"
+        f"━━━━━━━━━━━━\n"
+        f"  {f['home']}\n"
+        f"  {score}\n"
+        f"  {f['away']}\n"
+        f"━━━━━━━━━━━━\n"
+        f"📅 {dt}\n"
+        f"{status}\n"
+        f"🏟️ {venue}"
     )
 
 

@@ -205,6 +205,12 @@ async def _show_fuel(send_to: Message, country: str, lang: str) -> None:
             for fuel_type, price in prices.items():
                 if fuel_type != "note":
                     text += f"  🔹 {fuel_type}: {price}\n"
+        if data.get("stale"):
+            text += (
+                "\n⚠️ _آخر بيانات معروفة — أبريل 2026_"
+                if lang == "ar"
+                else "\n⚠️ _Last known data — April 2026_"
+            )
         if data.get("note"):
             text += f"\n{t('label_note', lang)}: {data['note']}"
         await send_to.answer(text, parse_mode="Markdown")

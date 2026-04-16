@@ -79,14 +79,20 @@ def _status_line(f: dict, lang: str = "ar") -> str:
 
 
 def _card(f: dict, lang: str = "ar") -> str:
+    dt     = _fmt_full(f.get("date_utc", ""), lang)
+    score  = _score_display(f)
+    status = _status_line(f, lang)
+    venue  = f.get("venue") or "—"
     return (
-        f"⚽ {f['league_ar']}\n\n"
-        f"{f['home']}\n"
-        f"{_score_display(f)}\n"
-        f"{f['away']}\n\n"
-        f"{_status_line(f, lang)}\n"
-        f"🏟️ {f.get('venue') or '—'}\n"
-        f"🕙 {_fmt_local(f.get('date_utc', ''))} (Beirut)"
+        f"⚽ *{f['league_ar']}*\n"
+        f"━━━━━━━━━━━━\n"
+        f"  {f['home']}\n"
+        f"  {score}\n"
+        f"  {f['away']}\n"
+        f"━━━━━━━━━━━━\n"
+        f"📅 {dt}\n"
+        f"{status}\n"
+        f"🏟️ {venue}"
     )
 
 

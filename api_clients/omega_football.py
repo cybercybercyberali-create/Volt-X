@@ -171,13 +171,22 @@ class OmegaFootball:
                 await cache.set(cache_key, fd_fixtures, ttl=ttl)
                 return fd_fixtures
 
-        # Source 3 — Sofascore (no key, always free)
+        # Source 3 — Sofascore (no key, always free) — filter strictly by this league
+        sf_id    = _SF_TOURNAMENT_IDS.get(league_code_up)
+        league_ar_name = MAJOR_LEAGUES.get(league_code_up, {}).get("name_ar", "")
         all_fixtures: list[dict] = []
-        for delta in (0, -1, 1, -2, 2):
-            d = (today + timedelta(days=delta)).strftime("%Y-%m-%d")
-            result = await self._sofascore_scheduled(d)
-            if isinstance(result, list):
-                all_fixtures.extend(result)
+        if sf_id:
+            for delta in (0, -1, 1, -2, 2, 3):
+                d = (today + timedelta(days=delta)).strftime("%Y-%m-%d")
+                events = await self._sofascore_raw_day(d)
+                for ev in events:
+                    if ev.get("tournament", {}).get("id") != sf_id:
+                        continue
+                    n = _normalize_sofascore(ev)
+                    if n:
+                        if league_ar_name:
+                            n["league_ar"] = league_ar_name
+                        all_fixtures.append(n)
         if all_fixtures:
             await cache.set(cache_key, all_fixtures, ttl=ttl)
             return all_fixtures
@@ -362,7 +371,9 @@ class OmegaFootball:
         if events:
             _SF_LEAGUE_IDS = set(_SF_TOURNAMENT_IDS.values())
             filtered = [e for e in events if e.get("tournament", {}).get("id") in _SF_LEAGUE_IDS]
-            fixtures = [_normalize_sofascore(e) for e in (filtered or events)[:20]]
+            if not filtered:
+                return {"error": True}
+            fixtures = [_normalize_sofascore(e) for e in filtered[:20]]
             fixtures = [f for f in fixtures if f]
             if fixtures:
                 await cache.set(cache_key, fixtures, ttl=CACHE_TTL.get("football_static", 3600))
