@@ -5198,6 +5198,57 @@ class OmegaFootball:
         await cache.set(cache_key, result, ttl=60 if live else 300)
         return result
 
+    async def get_team_schedule_by_name(self, team_name: str, league_code: str = "") -> dict:
+        """Scan Sofascore daily events to build team schedule — no Sofascore team ID needed."""
+        cache_key = f"sfsc:tsched_name:{league_code}:{team_name}"
+        cached = await cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        from datetime import date, timedelta
+        today = date.today()
+        sf_id = _SF_TOURNAMENT_IDS.get(league_code.upper()) if league_code else None
+        team_lower = team_name.lower()
+
+        past: list[dict] = []
+        upcoming: list[dict] = []
+        live: list[dict] = []
+
+        for delta in range(-20, 10):
+            day = (today + timedelta(days=delta)).strftime("%Y-%m-%d")
+            events = await self._sofascore_raw_day(day)
+            for ev in events:
+                if sf_id and ev.get("tournament", {}).get("id") != sf_id:
+                    continue
+                home = ev.get("homeTeam", {}).get("name", "")
+                away = ev.get("awayTeam", {}).get("name", "")
+                if team_lower not in (home.lower(), away.lower()):
+                    continue
+                n = _normalize_sofascore(ev)
+                if not n:
+                    continue
+                status = n.get("status", "NS")
+                if status in ("1H", "2H", "HT", "ET", "PEN"):
+                    live.append(n)
+                elif status == "FT":
+                    past.append(n)
+                else:
+                    upcoming.append(n)
+
+        past.sort(key=lambda x: x.get("date_utc", ""), reverse=True)
+        upcoming.sort(key=lambda x: x.get("date_utc", ""))
+
+        has_data = bool(past or live or upcoming)
+        result = {
+            "past": past[:5],
+            "live": live,
+            "upcoming": upcoming[:5],
+            "error": not has_data,
+        }
+        if has_data:
+            await cache.set(cache_key, result, ttl=60 if live else 300)
+        return result
+
     async def get_events(self, fixture_id: int) -> list | dict:
         """Fetch match events: goals, cards, substitutions."""
         cache_key = f"apifb:events:{fixture_id}"
@@ -5419,6 +5470,46 @@ class OmegaMovies:
         except Exception as exc:
             logger.debug(f"OMDb error: {exc}")
         return None
+
+    async def get_by_genre(self, genre_id: int, lang: str = "en") -> dict[str, Any]:
+        """Get top movies by TMDB genre ID using discover endpoint."""
+        cache_key = f"movie:genre:{genre_id}:{lang}"
+        cached = await cache.get(cache_key)
+        if cached:
+            return cached
+        try:
+            tmdb_lang = "ar" if lang == "ar" else "en-US"
+            data = await self._tmdb.get(
+                "/discover/movie",
+                params={
+                    "api_key": settings.tmdb_api_key,
+                    "with_genres": genre_id,
+                    "sort_by": "popularity.desc",
+                    "language": tmdb_lang,
+                    "vote_count.gte": 200,
+                    "page": 1,
+                },
+            )
+            if data and "results" in data:
+                results = [
+                    {
+                        "id": item["id"],
+                        "title": item.get("title") or item.get("name", ""),
+                        "overview": (item.get("overview") or "")[:200],
+                        "release_date": item.get("release_date") or item.get("first_air_date", ""),
+                        "vote_average": round(item.get("vote_average", 0), 1),
+                        "genres": [_GENRE_MAP[g] for g in item.get("genre_ids", []) if g in _GENRE_MAP][:3],
+                        "media_type": "movie",
+                    }
+                    for item in data["results"][:10]
+                    if item.get("vote_average", 0) >= 6.0
+                ]
+                result = {"results": results, "error": False}
+                await cache.set(cache_key, result, ttl=CACHE_TTL["movies"])
+                return result
+        except Exception as exc:
+            logger.debug(f"get_by_genre error: {exc}")
+        return {"results": [], "error": True}
 
     async def _search_anime(self, query: str) -> Optional[dict]:
         """Search anime using Jikan (MyAnimeList)."""
@@ -6741,12 +6832,9 @@ def _parse_conversion(text: str) -> dict | None:
     if len(seen) >= 2:
         return {"base": seen[0][1], "target": seen[1][1], "amount": amount}
     if len(seen) == 1:
-        # Single currency — context decides direction
-        # "ما سعر الدولار" → USD vs multi
+        # Single currency → show multi-rate with it as base
         code = seen[0][1]
-        if code == "USD":
-            return None  # default multi-rate view
-        return {"base": "USD", "target": code, "amount": amount}
+        return {"base": code, "target": None, "amount": amount}
     return None
 
 
@@ -6791,17 +6879,19 @@ async def _send_pair(message: Message, base: str, target: str,
 
 
 _QUICK_PAIRS = [
-    ("USD", "LBP"), ("USD", "EUR"), ("USD", "GBP"),
-    ("USD", "TRY"), ("USD", "EGP"), ("EUR", "USD"),
-    ("USD", "SAR"), ("USD", "AED"),
+    # USD base
+    ("USD", "LBP"), ("USD", "EUR"), ("USD", "SAR"), ("USD", "AED"),
+    # EUR base
+    ("EUR", "USD"), ("EUR", "GBP"), ("EUR", "TRY"), ("EUR", "LBP"),
+    # other
+    ("GBP", "USD"), ("SAR", "USD"), ("USD", "EGP"), ("USD", "TRY"),
 ]
 
 
 def _currency_quick_kb() -> InlineKeyboardMarkup:
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     btns = [
-        InlineKeyboardButton(text=f"{b}→{t}", callback_data=f"cur_q:{b}:{t}")
-        for b, t in _QUICK_PAIRS
+        InlineKeyboardButton(text=f"{b}→{tgt}", callback_data=f"cur_q:{b}:{tgt}")
+        for b, tgt in _QUICK_PAIRS
     ]
     rows = [btns[i:i+4] for i in range(0, len(btns), 4)]
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -6830,8 +6920,11 @@ async def cmd_currency(message: Message, lang: str = "en") -> None:
     # ── Natural language ──────────────────────────────────────────────────────
     parsed = _parse_conversion(raw)
     if parsed:
-        await _send_pair(message, parsed["base"], parsed["target"],
-                         parsed["amount"], lang)
+        if parsed.get("target"):
+            await _send_pair(message, parsed["base"], parsed["target"],
+                             parsed["amount"], lang)
+        else:
+            await _send_multi(message, parsed["base"], lang)
     else:
         # Button tap with no specific pair — show prompt + quick-select keyboard
         hint = (
@@ -6939,7 +7032,7 @@ def _normalize_fuel_keys(prices: dict) -> dict:
         kl = raw_key.lower()
         matched = False
         for patterns_str, canonical in _FUEL_KEYS.items():
-            if canonical in out:
+            if canonical in out:          # already set by a better match
                 continue
             for p in patterns_str.split("|"):
                 if p in kl or p in raw_key:
@@ -6949,7 +7042,7 @@ def _normalize_fuel_keys(prices: dict) -> dict:
             if matched:
                 break
         if not matched:
-            out[raw_key] = val
+            out[raw_key] = val            # keep as-is if no mapping found
     return out
 
 
@@ -7034,37 +7127,19 @@ def _fuel_country_kb(lang: str = "ar") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-@router.message(Command("fuel"))
-async def cmd_fuel(message: Message, lang: str = "en") -> None:
-    args = message.text.split()[1:] if message.text else []
-    # Only accept a valid 2-letter country code; ignore natural language words
-    country = None
-    if args:
-        candidate = args[0].upper()
-        if len(candidate) == 2 and candidate.isalpha():
-            country = candidate
-
-    # No country specified → show selector keyboard
-    if not country:
-        prompt = "⛽ *اختر الدولة:*" if lang == "ar" else "⛽ *Select a country:*"
-        await message.answer(prompt, parse_mode="Markdown", reply_markup=_fuel_country_kb(lang))
-        return
-
-    await message.answer(t("fetching", lang))
+async def _show_fuel(send_to: Message, country: str, lang: str) -> None:
+    """Core fuel display — shared by command and callback."""
+    await send_to.answer(t("fetching", lang))
     try:
         data = await omega_fuel.get_prices(country)
 
-        # ── Lebanon: render the rich visual card ──────────────────────────────
+        # ── Lebanon: rich visual card ─────────────────────────────────────────
         if country == "LB":
             prices_raw = data.get("prices", {}) if not data.get("error") else {}
-
-            # Fetch LBP/USD rate early (needed for GPP conversion below)
             rate = await _fetch_exchange_rate()
-
             source_label = "IPT Group"
             ago = "—"
 
-            # Keep LBP-formatted prices (contain ل.ل / LL / LBP), then normalize keys
             lbp_prices = {
                 k: v for k, v in prices_raw.items()
                 if k != "note"
@@ -7074,7 +7149,6 @@ async def cmd_fuel(message: Message, lang: str = "en") -> None:
             prices_real = _normalize_fuel_keys(lbp_prices)
 
             if not _has_canonical_prices(prices_real):
-                # Try GPP USD prices → convert to LBP with canonical Arabic names
                 gpp_prices = {k: v for k, v in prices_raw.items()
                               if k != "note" and "USD" in str(v)
                               and any(c.isdigit() for c in str(v))}
@@ -7093,8 +7167,6 @@ async def cmd_fuel(message: Message, lang: str = "en") -> None:
                         source_label = "GlobalPetrolPrices"
 
             if not _has_canonical_prices(prices_real):
-                # Static fallback — IPT Group weekly prices (أبريل 2026)
-                # تُحدَّث يدوياً كل أسبوع من موقع IPT Group
                 prices_real = {
                     "بنزين 98": "2,427,000 ل.ل.",
                     "بنزين 95": "2,386,000 ل.ل.",
@@ -7111,43 +7183,52 @@ async def cmd_fuel(message: Message, lang: str = "en") -> None:
                 source=source_label,
                 ago=ago,
             )
-            await message.answer(card_text, parse_mode="Markdown")
+            await send_to.answer(card_text, parse_mode="Markdown")
             return
 
-        # ── Other countries: simple plain display ─────────────────────────────
+        # ── Other countries: simple display ──────────────────────────────────
         if data.get("error"):
-            await message.answer(t("error", lang))
+            await send_to.answer(t("error", lang))
             return
 
         name = data.get("country_name_ar", data.get("country_name_en", country))
         text = t("fuel_title_country", lang, country=name) + "\n\n"
-
         prices = data.get("prices", {})
         if isinstance(prices, dict):
             for fuel_type, price in prices.items():
                 if fuel_type != "note":
                     text += f"  🔹 {fuel_type}: {price}\n"
-
         if data.get("note"):
             text += f"\n{t('label_note', lang)}: {data['note']}"
-
-        await message.answer(text, parse_mode="Markdown")
+        await send_to.answer(text, parse_mode="Markdown")
 
     except Exception as exc:
-        logger.error(f"Fuel error: {exc}", exc_info=True)
-        await message.answer(t("error", lang))
+        logger.error(f"Fuel error for {country}: {exc}", exc_info=True)
+        await send_to.answer(t("error", lang))
+
+
+@router.message(Command("fuel"))
+async def cmd_fuel(message: Message, lang: str = "en") -> None:
+    args = message.text.split()[1:] if message.text else []
+    country = None
+    if args:
+        candidate = args[0].upper()
+        if len(candidate) == 2 and candidate.isalpha():
+            country = candidate
+
+    if not country:
+        prompt = "⛽ *اختر الدولة:*" if lang == "ar" else "⛽ *Select a country:*"
+        await message.answer(prompt, parse_mode="Markdown", reply_markup=_fuel_country_kb(lang))
+        return
+
+    await _show_fuel(message, country, lang)
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("fuel_c:"))
 async def handle_fuel_country_cb(callback: CallbackQuery, lang: str = "en") -> None:
     await callback.answer("⏳")
     country = callback.data.split(":", 1)[1].upper()
-    # Simulate a /fuel {country} message by calling the same logic
-    # Patch message.text so cmd_fuel parses the country
-    original_text = callback.message.text or ""
-    callback.message.text = f"/fuel {country}"
-    await cmd_fuel(callback.message, lang=lang)
-    callback.message.text = original_text
+    await _show_fuel(callback.message, country, lang)
 
 
 def register_fuel_handlers(dp) -> None:
@@ -7213,6 +7294,8 @@ _MONTHS_AR = [
 ]
 
 
+# ── date helpers ───────────────────────────────────────────────────────────────
+
 def _fmt_local(date_utc: str) -> str:
     try:
         dt = datetime.fromisoformat(date_utc.replace("Z", "+00:00"))
@@ -7221,10 +7304,12 @@ def _fmt_local(date_utc: str) -> str:
         return "—"
 
 
-def _fmt_full(date_utc: str) -> str:
+def _fmt_full(date_utc: str, lang: str = "ar") -> str:
     try:
         dt = datetime.fromisoformat(date_utc.replace("Z", "+00:00")).astimezone(_BEIRUT)
-        return f"{dt.day} {_MONTHS_AR[dt.month - 1]}  {dt.strftime('%H:%M')}"
+        if lang == "ar":
+            return f"{dt.day} {_MONTHS_AR[dt.month - 1]}  {dt.strftime('%H:%M')}"
+        return dt.strftime("%d %b  %H:%M")
     except Exception:
         return "—"
 
@@ -7237,6 +7322,8 @@ def _fmt_short_date(date_utc: str) -> str:
         return "—"
 
 
+# ── match card helpers ─────────────────────────────────────────────────────────
+
 def _score_display(f: dict) -> str:
     if f["status"] == "NS":
         return "🆚"
@@ -7245,27 +7332,35 @@ def _score_display(f: dict) -> str:
     return f"‹ {h if h is not None else '?'} - {a if a is not None else '?'} ›"
 
 
-def _status_line(f: dict) -> str:
+def _status_line(f: dict, lang: str = "ar") -> str:
     s = f.get("status", "NS")
     el = f.get("status_elapsed")
-    if s == "NS":   return "🗓️ موعد"
-    if s in ("1H", "2H"): return f"🔴 مباشر '{el}"
-    if s == "HT":   return "⏸️ استراحة"
-    if s == "FT":   return "🏁 انتهت"
-    if s == "ET":   return "⚡ وقت إضافي"
-    if s == "PEN":  return "🎯 ضربات ترجيح"
+    if lang == "ar":
+        if s == "NS":              return "🗓️ موعد"
+        if s in ("1H", "2H"):     return f"🔴 مباشر '{el}"
+        if s == "HT":             return "⏸️ استراحة"
+        if s == "FT":             return "🏁 انتهت"
+        if s == "ET":             return "⚡ وقت إضافي"
+        if s == "PEN":            return "🎯 ضربات ترجيح"
+    else:
+        if s == "NS":              return "🗓️ Scheduled"
+        if s in ("1H", "2H"):     return f"🔴 Live '{el}"
+        if s == "HT":             return "⏸️ Half Time"
+        if s == "FT":             return "🏁 Finished"
+        if s == "ET":             return "⚡ Extra Time"
+        if s == "PEN":            return "🎯 Penalties"
     return s
 
 
-def _card(f: dict) -> str:
+def _card(f: dict, lang: str = "ar") -> str:
     return (
         f"⚽ {f['league_ar']}\n\n"
         f"{f['home']}\n"
         f"{_score_display(f)}\n"
         f"{f['away']}\n\n"
-        f"{_status_line(f)}\n"
+        f"{_status_line(f, lang)}\n"
         f"🏟️ {f.get('venue') or '—'}\n"
-        f"🕙 {_fmt_local(f.get('date_utc', ''))} (بيروت)"
+        f"🕙 {_fmt_local(f.get('date_utc', ''))} (Beirut)"
     )
 
 
@@ -7273,14 +7368,14 @@ def _card_kb(f: dict) -> InlineKeyboardMarkup | None:
     fid = f.get("fixture_id")
     if fid and f.get("status") not in ("NS", "TBD"):
         return InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="📋 أحداث المباراة", callback_data=f"fb_ev:{fid}")
+            InlineKeyboardButton(text="📋 أحداث | Events", callback_data=f"fb_ev:{fid}")
         ]])
     return None
 
 
 def _fmt_events(events: list) -> str:
     if not events:
-        return "لا توجد أحداث مسجلة بعد"
+        return "لا توجد أحداث | No events recorded"
     lines: list[str] = []
     for ev in events:
         ev_type = ev.get("type", "")
@@ -7305,31 +7400,38 @@ def _fmt_events(events: list) -> str:
             line += f"  _{team}_"
         lines.append(line)
 
-    return "📋 *أحداث المباراة*\n\n" + "\n".join(lines)
+    return "📋 *Match Events*\n\n" + "\n".join(lines)
 
 
-def _league_kb() -> InlineKeyboardMarkup:
+# ── keyboards ──────────────────────────────────────────────────────────────────
+
+def _league_kb(lang: str = "ar") -> InlineKeyboardMarkup:
     btns = [
         InlineKeyboardButton(text=info["name_ar"], callback_data=f"fb:{code}")
         for code, info in MAJOR_LEAGUES.items()
     ]
     rows = [btns[i:i+2] for i in range(0, len(btns), 2)]
-    rows.append([InlineKeyboardButton(text="🔴 نتائج مباشرة", callback_data="fb:live")])
+    live_lbl = "🔴 نتائج مباشرة" if lang == "ar" else "🔴 Live Now"
+    rows.append([InlineKeyboardButton(text=live_lbl, callback_data="fb:live")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def _team_kb(teams: list, league_code: str) -> InlineKeyboardMarkup:
+def _team_kb(teams: list, league_code: str, lang: str = "ar") -> InlineKeyboardMarkup:
+    """Use index (0-based) as callback data — stays within 64-byte limit."""
     btns = [
         InlineKeyboardButton(
-            text=t["name"],
-            callback_data=f"fb_t:{t['id']}:{league_code}",
+            text=tm["name"],
+            callback_data=f"fb_t:{i}:{league_code}",
         )
-        for t in teams[:24]
+        for i, tm in enumerate(teams[:24])
     ]
     rows = [btns[i:i+2] for i in range(0, len(btns), 2)]
-    rows.append([InlineKeyboardButton(text="🔙 الدوريات", callback_data="fb:menu")])
+    back_lbl = "🔙 الدوريات" if lang == "ar" else "🔙 Leagues"
+    rows.append([InlineKeyboardButton(text=back_lbl, callback_data="fb:menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
+
+# ── team schedule card ─────────────────────────────────────────────────────────
 
 def _result_emoji(f: dict, team_name: str) -> str:
     if f.get("status") != "FT":
@@ -7345,12 +7447,13 @@ def _result_emoji(f: dict, team_name: str) -> str:
     return "🔴"
 
 
-def _team_schedule_card(sched: dict, team_name: str, league_ar: str) -> str:
+def _team_schedule_card(sched: dict, team_name: str, league_ar: str, lang: str = "ar") -> str:
     SEP = "━━━━━━━━━━━━"
     lines = [f"⚽ *{league_ar}*", f"🏆 *{team_name}*", SEP]
 
     if sched.get("live"):
-        lines.append("🔴 *مباشر الآن*")
+        lbl = "🔴 *مباشر الآن*" if lang == "ar" else "🔴 *Live Now*"
+        lines.append(lbl)
         for f in sched["live"]:
             el = f.get("status_elapsed", "")
             el_str = f"  `{el}'`" if el else ""
@@ -7360,8 +7463,9 @@ def _team_schedule_card(sched: dict, team_name: str, league_ar: str) -> str:
         lines.append(SEP)
 
     if sched.get("past"):
-        lines.append("📅 *الأخيرة*")
-        for f in sched["past"][:5]:
+        lbl = "📅 *الأخيرة*" if lang == "ar" else "📅 *Recent*"
+        lines.append(lbl)
+        for f in sched["past"]:
             res = _result_emoji(f, team_name)
             h_s = f.get("home_score", "?")
             a_s = f.get("away_score", "?")
@@ -7370,14 +7474,21 @@ def _team_schedule_card(sched: dict, team_name: str, league_ar: str) -> str:
         lines.append(SEP)
 
     if sched.get("upcoming"):
-        lines.append("📆 *القادمة*")
-        for f in sched["upcoming"][:5]:
-            dt = _fmt_full(f.get("date_utc", ""))
+        lbl = "📆 *القادمة*" if lang == "ar" else "📆 *Upcoming*"
+        lines.append(lbl)
+        for f in sched["upcoming"]:
+            dt = _fmt_full(f.get("date_utc", ""), lang)
             lines.append(f"⬜  {f['home']}  🆚  {f['away']}")
             lines.append(f"     `{dt}`")
 
+    if not any(sched.get(k) for k in ("past", "live", "upcoming")):
+        no_data = "لا توجد بيانات متاحة" if lang == "ar" else "No data available"
+        lines.append(no_data)
+
     return "\n".join(lines)
 
+
+# ── internal send helpers ──────────────────────────────────────────────────────
 
 def _today(fixtures: list) -> list:
     today = datetime.now(timezone.utc).date().isoformat()
@@ -7385,10 +7496,17 @@ def _today(fixtures: list) -> list:
 
 
 def _nearest(fixtures: list) -> list:
-    upcoming = sorted([f for f in fixtures if f.get("status") == "NS"], key=lambda f: f.get("date_utc", ""))
+    upcoming = sorted(
+        [f for f in fixtures if f.get("status") == "NS"],
+        key=lambda f: f.get("date_utc", ""),
+    )
     if upcoming:
         return upcoming[:8]
-    return sorted([f for f in fixtures if f.get("status") == "FT"], key=lambda f: f.get("date_utc", ""), reverse=True)[:8]
+    return sorted(
+        [f for f in fixtures if f.get("status") == "FT"],
+        key=lambda f: f.get("date_utc", ""),
+        reverse=True,
+    )[:8]
 
 
 async def _send_fixtures(target, league_code: str, lang: str) -> None:
@@ -7403,7 +7521,7 @@ async def _send_fixtures(target, league_code: str, lang: str) -> None:
         return
     for f in selection[:8]:
         kb = _card_kb(f)
-        await send(_card(f), parse_mode="Markdown", reply_markup=kb)
+        await send(_card(f, lang), parse_mode="Markdown", reply_markup=kb)
 
 
 async def _send_live(target, lang: str) -> None:
@@ -7417,8 +7535,10 @@ async def _send_live(target, lang: str) -> None:
         return
     for f in data[:8]:
         kb = _card_kb(f)
-        await send(_card(f), parse_mode="Markdown", reply_markup=kb)
+        await send(_card(f, lang), parse_mode="Markdown", reply_markup=kb)
 
+
+# ── command handler ────────────────────────────────────────────────────────────
 
 @router.message(Command("football"))
 async def cmd_football(message: Message, lang: str = "en") -> None:
@@ -7430,15 +7550,23 @@ async def cmd_football(message: Message, lang: str = "en") -> None:
     arg = raw.upper()
 
     if not arg:
-        await message.answer(t("fb_choose_league", lang), parse_mode="Markdown", reply_markup=_league_kb())
+        await message.answer(
+            t("fb_choose_league", lang), parse_mode="Markdown",
+            reply_markup=_league_kb(lang),
+        )
         return
     if arg == "LIVE":
         await _send_live(message, lang)
     elif arg in MAJOR_LEAGUES:
         await _send_fixtures(message, arg, lang)
     else:
-        await message.answer(t("fb_choose_league", lang), parse_mode="Markdown", reply_markup=_league_kb())
+        await message.answer(
+            t("fb_choose_league", lang), parse_mode="Markdown",
+            reply_markup=_league_kb(lang),
+        )
 
+
+# ── callback: league / live / back ────────────────────────────────────────────
 
 @router.callback_query(lambda c: c.data and c.data.startswith("fb:"))
 async def handle_fb_cb(callback: CallbackQuery, lang: str = "en") -> None:
@@ -7455,13 +7583,13 @@ async def handle_fb_cb(callback: CallbackQuery, lang: str = "en") -> None:
             await callback.message.edit_text(
                 t("fb_choose_league", lang),
                 parse_mode="Markdown",
-                reply_markup=_league_kb(),
+                reply_markup=_league_kb(lang),
             )
         except Exception:
             await callback.message.answer(
                 t("fb_choose_league", lang),
                 parse_mode="Markdown",
-                reply_markup=_league_kb(),
+                reply_markup=_league_kb(lang),
             )
         return
 
@@ -7473,20 +7601,23 @@ async def handle_fb_cb(callback: CallbackQuery, lang: str = "en") -> None:
     teams = await omega_football.get_league_teams(league_code)
 
     if teams:
-        text = f"⚽ *{league_ar}*\n\n🏟️ اختر الفريق:"
+        choose_lbl = "🏟️ اختر الفريق:" if lang == "ar" else "🏟️ Choose a team:"
+        text = f"⚽ *{league_ar}*\n\n{choose_lbl}"
         try:
             await callback.message.edit_text(
                 text, parse_mode="Markdown",
-                reply_markup=_team_kb(teams, league_code),
+                reply_markup=_team_kb(teams, league_code, lang),
             )
         except Exception:
             await callback.message.answer(
                 text, parse_mode="Markdown",
-                reply_markup=_team_kb(teams, league_code),
+                reply_markup=_team_kb(teams, league_code, lang),
             )
     else:
         await _send_fixtures(callback, league_code, lang)
 
+
+# ── callback: team schedule ───────────────────────────────────────────────────
 
 @router.callback_query(lambda c: c.data and c.data.startswith("fb_t:"))
 async def handle_fb_team_cb(callback: CallbackQuery, lang: str = "en") -> None:
@@ -7495,29 +7626,32 @@ async def handle_fb_team_cb(callback: CallbackQuery, lang: str = "en") -> None:
     if len(parts) < 3:
         return
     try:
-        team_id     = int(parts[1])
+        team_idx    = int(parts[1])
         league_code = parts[2].upper()
     except (ValueError, IndexError):
         return
 
     league_ar = MAJOR_LEAGUES.get(league_code, {}).get("name_ar", league_code)
-    teams     = await omega_football.get_league_teams(league_code)
-    team_info = next((x for x in teams if x["id"] == team_id), None)
-    team_name = team_info["name"] if team_info else f"Team #{team_id}"
 
-    sched = await omega_football.get_team_schedule(team_id)
-
-    if sched.get("error"):
+    teams = await omega_football.get_league_teams(league_code)
+    if team_idx >= len(teams):
         await callback.message.answer(t("error", lang))
         return
+    team_name = teams[team_idx]["name"]
 
-    card = _team_schedule_card(sched, team_name, league_ar)
+    sched = await omega_football.get_team_schedule_by_name(team_name, league_code)
+    card  = _team_schedule_card(sched, team_name, league_ar, lang)
+
+    back_lbl   = "🔙 الفرق"  if lang == "ar" else "🔙 Teams"
+    reload_lbl = "🔄 تحديث"  if lang == "ar" else "🔄 Refresh"
     back_kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="🔙 الفرق",  callback_data=f"fb:{league_code.lower()}"),
-        InlineKeyboardButton(text="🔄 تحديث",  callback_data=f"fb_t:{team_id}:{league_code}"),
+        InlineKeyboardButton(text=back_lbl,   callback_data=f"fb:{league_code.lower()}"),
+        InlineKeyboardButton(text=reload_lbl, callback_data=f"fb_t:{team_idx}:{league_code}"),
     ]])
     await callback.message.answer(card, parse_mode="Markdown", reply_markup=back_kb)
 
+
+# ── callback: match events ─────────────────────────────────────────────────────
 
 @router.callback_query(lambda c: c.data and c.data.startswith("fb_ev:"))
 async def handle_fb_events_cb(callback: CallbackQuery, lang: str = "en") -> None:
@@ -7554,6 +7688,32 @@ router = Router(name="movies")
 
 _YEAR_RE = re.compile(r"\b(19[0-9]{2}|20[0-9]{2})\b")
 
+# Genre list: (tmdb_id, ar_label, en_label)
+_GENRES = [
+    (28,    "🎬 أكشن",       "🎬 Action"),
+    (35,    "😂 كوميدي",     "😂 Comedy"),
+    (18,    "🎭 دراما",      "🎭 Drama"),
+    (27,    "👻 رعب",        "👻 Horror"),
+    (10749, "❤️ رومانسي",   "❤️ Romance"),
+    (878,   "🚀 خيال علمي",  "🚀 Sci-Fi"),
+    (53,    "🔍 إثارة",      "🔍 Thriller"),
+    (16,    "🎨 أنيمي",      "🎨 Animation"),
+    (80,    "🔫 جريمة",      "🔫 Crime"),
+    (12,    "🌍 مغامرة",     "🌍 Adventure"),
+]
+
+
+def _genre_kb(lang: str) -> InlineKeyboardMarkup:
+    btns = [
+        InlineKeyboardButton(
+            text=(ar if lang == "ar" else en),
+            callback_data=f"mv_g:{gid}",
+        )
+        for gid, ar, en in _GENRES
+    ]
+    rows = [btns[i:i+2] for i in range(0, len(btns), 2)]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
 
 def _extract_year(text: str) -> tuple:
     m = _YEAR_RE.search(text)
@@ -7571,38 +7731,25 @@ def _item_year(item: dict) -> int | None:
 
 
 def _caption(item: dict) -> str:
+    """Clean text-only card — no poster."""
     title = item.get("title", "")
     rd = item.get("release_date", "")
     year = rd[:4] if rd else "?"
     vote = item.get("vote_average", 0)
     genres = item.get("genres", [])
-    genres_str = ", ".join(genres) if isinstance(genres, list) and genres else "—"
-    overview = item.get("overview", "")
+    genres_str = " · ".join(genres[:2]) if genres else "—"
+    overview = (item.get("overview") or "")
     preview = overview[:180] + ("..." if len(overview) > 180 else "")
     return (
-        f"🎬 *{title}* ({year})\n"
-        f"⭐ {vote}/10  |  🎭 {genres_str}\n"
-        f"📅 {rd}\n"
+        f"🎬 *{title}* `({year})`\n"
+        f"⭐ `{vote}/10`  ·  🎭 {genres_str}\n"
         f"📝 {preview}"
     )
 
 
 async def _send_card(msg: Message, item: dict, lang: str) -> None:
-    poster = item.get("poster", "")
     cap = _caption(item)
-    kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(
-            text=t("btn_details", lang),
-            callback_data=f"mv:detail:{item['id']}:{item.get('media_type','movie')}",
-        )
-    ]])
-    try:
-        if poster:
-            await msg.answer_photo(photo=poster, caption=cap, parse_mode="Markdown", reply_markup=kb)
-            return
-    except Exception:
-        pass
-    await msg.answer(cap, parse_mode="Markdown", reply_markup=kb)
+    await msg.answer(cap, parse_mode="Markdown")
 
 
 @router.message(Command("movie"))
@@ -7613,19 +7760,11 @@ async def cmd_movie(message: Message, lang: str = "en") -> None:
             raw = raw[len(prefix):].strip()
             break
 
+    # No query → show genre selector
     if not raw:
-        hint = (
-            "🎬 *أرسل اسم الفيلم للبحث*\n\nمثال: `باتمان` أو `Inception 2010`\n\n🔥 *الأكثر مشاهدة الآن:*"
-            if lang == "ar"
-            else "🎬 *Send a movie name to search*\n\nExample: `Batman` or `Inception 2010`\n\n🔥 *Trending Now:*"
-        )
-        await message.answer(hint, parse_mode="Markdown")
-        data = await omega_movies.get_trending()
-        if data.get("error") or not data.get("results"):
-            await message.answer(t("error", lang))
-            return
-        for item in data["results"][:3]:
-            await _send_card(message, item, lang)
+        prompt = "🎬 *اختر النوع أو ابحث باسم الفيلم:*" if lang == "ar" \
+            else "🎬 *Pick a genre or search by name:*"
+        await message.answer(prompt, parse_mode="Markdown", reply_markup=_genre_kb(lang))
         return
 
     query, requested_year = _extract_year(raw)
@@ -7642,10 +7781,12 @@ async def cmd_movie(message: Message, lang: str = "en") -> None:
         if requested_year is not None:
             filtered = [r for r in results if _item_year(r) == requested_year]
             if not filtered:
-                await message.answer(
-                    f"❌ لا توجد أفلام موثّقة في {requested_year}\n"
-                    f"No verified {requested_year} movies found."
+                no_result = (
+                    f"❌ لا توجد نتائج في {requested_year}"
+                    if lang == "ar"
+                    else f"❌ No results found for {requested_year}"
                 )
+                await message.answer(no_result)
                 return
             results = filtered
 
@@ -7655,6 +7796,23 @@ async def cmd_movie(message: Message, lang: str = "en") -> None:
     except Exception as exc:
         logger.error(f"Movie error: {exc}", exc_info=True)
         await message.answer(t("error", lang))
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("mv_g:"))
+async def handle_genre_cb(callback: CallbackQuery, lang: str = "en") -> None:
+    await callback.answer("⏳")
+    try:
+        genre_id = int(callback.data.split(":")[1])
+    except (IndexError, ValueError):
+        return
+
+    data = await omega_movies.get_by_genre(genre_id, lang=lang)
+    if data.get("error") or not data.get("results"):
+        await callback.message.answer(t("not_found", lang))
+        return
+
+    for item in data["results"][:5]:
+        await _send_card(callback.message, item, lang)
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("mv:"))
@@ -7677,24 +7835,25 @@ async def handle_mv_cb(callback: CallbackQuery, lang: str = "en") -> None:
     rd = data.get("release_date", "")
     year = rd[:4] if rd else "?"
     vote = data.get("vote_average", 0)
-    genres = ", ".join(data.get("genres", []))
-    overview = data.get("overview", "")[:180]
+    genres = " · ".join(data.get("genres", [])[:3])
+    overview = (data.get("overview") or "")[:200]
 
     text = (
-        f"🎬 *{title}* ({year})\n"
-        f"⭐ {vote}/10  |  🎭 {genres}\n"
+        f"🎬 *{title}* `({year})`\n"
+        f"⭐ `{vote}/10`  ·  🎭 {genres}\n"
         f"📅 {rd}"
     )
     if data.get("runtime"):
-        text += f"  |  ⏱ {data['runtime']} min"
+        text += f"  ·  ⏱ {data['runtime']} min"
     if data.get("tagline"):
         text += f"\n\n_{data['tagline']}_"
     if data.get("director"):
         text += f"\n\n🎬 {t('label_director', lang)}: {data['director']}"
     if data.get("cast"):
-        names = ", ".join(c["name"] for c in data["cast"][:5])
+        names = ", ".join(c["name"] for c in data["cast"][:4])
         text += f"\n🌟 {t('label_cast', lang)}: {names}"
-    text += f"\n\n📝 {overview}"
+    if overview:
+        text += f"\n\n📝 {overview}"
     if data.get("trailer_url"):
         text += f"\n\n🎥 [Trailer]({data['trailer_url']})"
 
