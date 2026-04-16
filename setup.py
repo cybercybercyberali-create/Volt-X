@@ -6630,7 +6630,7 @@ FILES["handlers/currency.py"] = r'''
 import logging
 import re
 from aiogram import Router
-from aiogram.types import Message
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 
 from api_clients.omega_currency import omega_currency
@@ -6790,6 +6790,23 @@ async def _send_pair(message: Message, base: str, target: str,
     await message.answer(header + body + stale, parse_mode="Markdown")
 
 
+_QUICK_PAIRS = [
+    ("USD", "LBP"), ("USD", "EUR"), ("USD", "GBP"),
+    ("USD", "TRY"), ("USD", "EGP"), ("EUR", "USD"),
+    ("USD", "SAR"), ("USD", "AED"),
+]
+
+
+def _currency_quick_kb() -> InlineKeyboardMarkup:
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    btns = [
+        InlineKeyboardButton(text=f"{b}→{t}", callback_data=f"cur_q:{b}:{t}")
+        for b, t in _QUICK_PAIRS
+    ]
+    rows = [btns[i:i+4] for i in range(0, len(btns), 4)]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 @router.message(Command("currency"))
 async def cmd_currency(message: Message, lang: str = "en") -> None:
     raw = message.text or ""
@@ -6816,7 +6833,23 @@ async def cmd_currency(message: Message, lang: str = "en") -> None:
         await _send_pair(message, parsed["base"], parsed["target"],
                          parsed["amount"], lang)
     else:
-        await _send_multi(message, "USD", lang)
+        # Button tap with no specific pair — show prompt + quick-select keyboard
+        hint = (
+            "💱 *تحويل العملات*\n\n"
+            "اكتب مثال:\n"
+            "  `100 دولار بيورو`\n"
+            "  `USD EUR`\n"
+            "  `كم يساوي الدولار بالليرة`\n\n"
+            "أو اختر زوجاً سريعاً:"
+            if lang == "ar"
+            else
+            "💱 *Currency Converter*\n\n"
+            "Type e.g.:\n"
+            "  `100 USD to EUR`\n"
+            "  `euro to lira`\n\n"
+            "Or pick a quick pair:"
+        )
+        await message.answer(hint, parse_mode="Markdown", reply_markup=_currency_quick_kb())
 
 
 async def _send_multi(message: Message, base: str, lang: str) -> None:
@@ -6850,6 +6883,16 @@ async def _send_multi(message: Message, base: str, lang: str) -> None:
     await message.answer(text, parse_mode="Markdown")
 
 
+@router.callback_query(lambda c: c.data and c.data.startswith("cur_q:"))
+async def handle_cur_quick_cb(callback: CallbackQuery, lang: str = "en") -> None:
+    await callback.answer()
+    parts = callback.data.split(":")
+    if len(parts) < 3:
+        return
+    base, target = parts[1], parts[2]
+    await _send_pair(callback.message, base, target, 1.0, lang)
+
+
 def register_currency_handlers(dp) -> None:
     dp.include_router(router)
 '''
@@ -6858,7 +6901,7 @@ FILES["handlers/fuel.py"] = r'''
 import logging
 import httpx
 from aiogram import Router
-from aiogram.types import Message
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 
 from api_clients.omega_fuel import omega_fuel
@@ -6969,15 +7012,43 @@ async def _fetch_exchange_rate() -> float:
     return _FALLBACK_RATE
 
 
+# ── Country selector ──────────────────────────────────────────────────────────
+_FUEL_COUNTRIES = [
+    ("🇱🇧 لبنان",      "LB"), ("🇸🇦 السعودية",  "SA"), ("🇦🇪 الإمارات",  "AE"),
+    ("🇪🇬 مصر",        "EG"), ("🇰🇼 الكويت",    "KW"), ("🇶🇦 قطر",       "QA"),
+    ("🇯🇴 الأردن",     "JO"), ("🇮🇶 العراق",    "IQ"), ("🇩🇿 الجزائر",   "DZ"),
+    ("🇲🇦 المغرب",     "MA"), ("🇹🇳 تونس",      "TN"), ("🇹🇷 تركيا",     "TR"),
+    ("🇺🇸 USA",        "US"), ("🇩🇪 Germany",   "DE"), ("🇫🇷 France",    "FR"),
+    ("🇬🇧 UK",         "GB"), ("🇯🇵 Japan",     "JP"), ("🇮🇳 India",     "IN"),
+    ("🇧🇷 Brazil",     "BR"), ("🇷🇺 Russia",    "RU"), ("🇨🇳 China",     "CN"),
+]
+
+
+def _fuel_country_kb(lang: str = "ar") -> InlineKeyboardMarkup:
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    btns = [
+        InlineKeyboardButton(text=name, callback_data=f"fuel_c:{code}")
+        for name, code in _FUEL_COUNTRIES
+    ]
+    rows = [btns[i:i+3] for i in range(0, len(btns), 3)]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 @router.message(Command("fuel"))
 async def cmd_fuel(message: Message, lang: str = "en") -> None:
     args = message.text.split()[1:] if message.text else []
     # Only accept a valid 2-letter country code; ignore natural language words
-    country = "LB"
+    country = None
     if args:
         candidate = args[0].upper()
         if len(candidate) == 2 and candidate.isalpha():
             country = candidate
+
+    # No country specified → show selector keyboard
+    if not country:
+        prompt = "⛽ *اختر الدولة:*" if lang == "ar" else "⛽ *Select a country:*"
+        await message.answer(prompt, parse_mode="Markdown", reply_markup=_fuel_country_kb(lang))
+        return
 
     await message.answer(t("fetching", lang))
     try:
@@ -7065,6 +7136,18 @@ async def cmd_fuel(message: Message, lang: str = "en") -> None:
     except Exception as exc:
         logger.error(f"Fuel error: {exc}", exc_info=True)
         await message.answer(t("error", lang))
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("fuel_c:"))
+async def handle_fuel_country_cb(callback: CallbackQuery, lang: str = "en") -> None:
+    await callback.answer("⏳")
+    country = callback.data.split(":", 1)[1].upper()
+    # Simulate a /fuel {country} message by calling the same logic
+    # Patch message.text so cmd_fuel parses the country
+    original_text = callback.message.text or ""
+    callback.message.text = f"/fuel {country}"
+    await cmd_fuel(callback.message, lang=lang)
+    callback.message.text = original_text
 
 
 def register_fuel_handlers(dp) -> None:
@@ -7531,11 +7614,17 @@ async def cmd_movie(message: Message, lang: str = "en") -> None:
             break
 
     if not raw:
+        hint = (
+            "🎬 *أرسل اسم الفيلم للبحث*\n\nمثال: `باتمان` أو `Inception 2010`\n\n🔥 *الأكثر مشاهدة الآن:*"
+            if lang == "ar"
+            else "🎬 *Send a movie name to search*\n\nExample: `Batman` or `Inception 2010`\n\n🔥 *Trending Now:*"
+        )
+        await message.answer(hint, parse_mode="Markdown")
         data = await omega_movies.get_trending()
         if data.get("error") or not data.get("results"):
             await message.answer(t("error", lang))
             return
-        for item in data["results"][:5]:
+        for item in data["results"][:3]:
             await _send_card(message, item, lang)
         return
 
