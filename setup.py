@@ -4194,26 +4194,26 @@ _COUNTRY_NAMES: dict[str, tuple[str, str]] = {
 }
 
 _STATIC_FUEL_PRICES: dict[str, dict] = {
-    "SA": {"بنزين 91": "0.175 USD/L", "بنزين 95": "0.209 USD/L", "ديزل": "0.209 USD/L"},
-    "AE": {"بنزين 95": "0.645 USD/L", "بنزين 98": "0.704 USD/L", "ديزل": "0.640 USD/L"},
-    "EG": {"بنزين 80": "0.270 USD/L", "بنزين 92": "0.350 USD/L", "بنزين 95": "0.440 USD/L", "ديزل": "0.250 USD/L"},
-    "KW": {"بنزين 91": "0.272 USD/L", "بنزين 95": "0.300 USD/L", "ديزل": "0.280 USD/L"},
-    "QA": {"بنزين 91": "0.449 USD/L", "بنزين 95": "0.461 USD/L", "ديزل": "0.449 USD/L"},
-    "JO": {"بنزين 90": "1.110 USD/L", "بنزين 95": "1.230 USD/L", "ديزل": "1.050 USD/L"},
-    "IQ": {"بنزين":    "0.530 USD/L", "ديزل":     "0.550 USD/L"},
-    "DZ": {"بنزين":    "0.323 USD/L", "ديزل":     "0.207 USD/L"},
-    "MA": {"بنزين 95": "1.230 USD/L", "ديزل":     "1.010 USD/L"},
-    "TN": {"بنزين 91": "0.820 USD/L", "بنزين 95": "0.900 USD/L", "ديزل": "0.690 USD/L"},
-    "TR": {"بنزين 95": "1.450 USD/L", "ديزل":     "1.400 USD/L"},
-    "US": {"Gasoline (Regular)": "0.900 USD/L", "Diesel": "0.970 USD/L"},
-    "DE": {"Super 95":           "1.740 USD/L", "Diesel": "1.620 USD/L"},
-    "FR": {"SP95":               "1.700 USD/L", "Diesel": "1.570 USD/L"},
-    "GB": {"Petrol E10":         "1.640 USD/L", "Diesel": "1.660 USD/L"},
-    "JP": {"Regular":            "1.200 USD/L", "Diesel": "1.100 USD/L"},
-    "IN": {"Petrol":             "1.150 USD/L", "Diesel": "0.990 USD/L"},
-    "BR": {"Gasoline":           "1.310 USD/L", "Diesel": "1.100 USD/L"},
-    "RU": {"AI-95":              "0.570 USD/L", "Diesel": "0.540 USD/L"},
-    "CN": {"No. 92":             "1.050 USD/L", "Diesel": "0.990 USD/L"},
+    "SA": {"بنزين 91": "0.208 USD/L", "بنزين 95": "0.240 USD/L", "ديزل": "0.067 USD/L"},
+    "AE": {"بنزين 91 (E-Plus)": "0.720 USD/L", "بنزين 95 (Special)": "0.757 USD/L", "بنزين 98 (Super)": "0.786 USD/L", "ديزل": "0.736 USD/L"},
+    "EG": {"بنزين 92": "0.275 USD/L", "بنزين 95": "0.327 USD/L", "ديزل": "0.168 USD/L"},
+    "KW": {"بنزين 91 (Premium)": "0.197 USD/L", "بنزين 95 (Super)": "0.230 USD/L", "ديزل": "0.197 USD/L"},
+    "QA": {"بنزين 91 (Special)": "0.449 USD/L", "بنزين 95 (Premium)": "0.461 USD/L", "ديزل": "0.449 USD/L"},
+    "JO": {"بنزين 90": "1.061 USD/L", "بنزين 95": "1.229 USD/L", "ديزل": "1.272 USD/L"},
+    "IQ": {"بنزين": "0.307 USD/L", "ديزل": "0.230 USD/L"},
+    "DZ": {"بنزين": "0.277 USD/L", "ديزل": "0.166 USD/L"},
+    "MA": {"بنزين 95": "1.230 USD/L", "ديزل": "1.010 USD/L"},
+    "TN": {"بنزين 91": "0.820 USD/L", "بنزين 95": "0.899 USD/L", "ديزل": "0.690 USD/L"},
+    "TR": {"بنزين 95": "1.260 USD/L", "ديزل": "1.140 USD/L"},
+    "US": {"Gasoline (Regular)": "0.950 USD/L", "Diesel": "1.000 USD/L"},
+    "DE": {"Super E10 (95)": "1.750 USD/L", "Diesel": "1.600 USD/L"},
+    "FR": {"SP95-E10": "1.700 USD/L", "Diesel": "1.550 USD/L"},
+    "GB": {"Petrol E10": "1.650 USD/L", "Diesel": "1.680 USD/L"},
+    "JP": {"Regular": "1.200 USD/L", "Diesel": "1.150 USD/L"},
+    "IN": {"Petrol": "1.300 USD/L", "Diesel": "1.100 USD/L"},
+    "BR": {"Gasoline": "1.200 USD/L", "Diesel": "1.000 USD/L"},
+    "RU": {"AI-95": "0.620 USD/L", "Diesel": "0.580 USD/L"},
+    "CN": {"No. 92": "1.050 USD/L", "Diesel": "0.990 USD/L"},
 }
 
 ARAB_FUEL_SOURCES = {
@@ -7466,6 +7466,47 @@ def _card(f: dict, lang: str = "ar") -> str:
     )
 
 
+def _matchday_card(fixtures: list, league_ar: str, lang: str = "ar") -> str:
+    """Format all matches as a single matchday overview — like football sites."""
+    SEP  = "──────────────"
+    live = [f for f in fixtures if f.get("status") in ("1H", "2H", "HT", "ET", "PEN")]
+    done = [f for f in fixtures if f.get("status") == "FT"]
+    ns   = [f for f in fixtures if f.get("status") == "NS"]
+
+    lines = [f"⚽ *{league_ar}*", SEP]
+
+    if live:
+        lbl = "🔴 *مباشر*" if lang == "ar" else "🔴 *Live*"
+        lines.append(lbl)
+        for f in live:
+            el   = f.get("status_elapsed", "")
+            tag  = f"  `{el}'`" if el else ""
+            h, a = f.get("home_score", 0), f.get("away_score", 0)
+            lines.append(f"  {f['home']}  `{h} – {a}`  {f['away']}{tag}")
+        lines.append(SEP)
+
+    if done:
+        lbl = "🏁 *انتهت*" if lang == "ar" else "🏁 *Finished*"
+        lines.append(lbl)
+        for f in done:
+            h, a = f.get("home_score", "?"), f.get("away_score", "?")
+            lines.append(f"  {f['home']}  `{h} – {a}`  {f['away']}")
+        lines.append(SEP)
+
+    if ns:
+        lbl = "🗓️ *المواعيد*" if lang == "ar" else "🗓️ *Scheduled*"
+        lines.append(lbl)
+        for f in ns:
+            time_s = _fmt_local(f.get("date_utc", ""))
+            date_s = _fmt_short_date(f.get("date_utc", ""))
+            lines.append(f"  `{date_s}  {time_s}`  {f['home']}  🆚  {f['away']}")
+
+    if not (live or done or ns):
+        lines.append("لا توجد مباريات متاحة" if lang == "ar" else "No matches available")
+
+    return "\n".join(lines)
+
+
 def _card_kb(f: dict) -> InlineKeyboardMarkup | None:
     fid = f.get("fixture_id")
     if fid and f.get("status") not in ("NS", "TBD"):
@@ -7518,8 +7559,22 @@ def _league_kb(lang: str = "ar") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def _matchday_kb(league_code: str, lang: str = "ar") -> InlineKeyboardMarkup:
+    lc          = league_code.lower()
+    team_lbl    = "🔍 اختر فريقاً" if lang == "ar" else "🔍 Choose Team"
+    live_lbl    = "🔴 مباشر"       if lang == "ar" else "🔴 Live Now"
+    refresh_lbl = "🔄 تحديث"       if lang == "ar" else "🔄 Refresh"
+    back_lbl    = "🔙 الدوريات"    if lang == "ar" else "🔙 Leagues"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=team_lbl,    callback_data=f"fb_teams:{lc}")],
+        [InlineKeyboardButton(text=live_lbl,    callback_data="fb:live"),
+         InlineKeyboardButton(text=refresh_lbl, callback_data=f"fb:{lc}")],
+        [InlineKeyboardButton(text=back_lbl,    callback_data="fb:menu")],
+    ])
+
+
 def _team_kb(teams: list, league_code: str, lang: str = "ar") -> InlineKeyboardMarkup:
-    """Use index (0-based) as callback data — stays within 64-byte limit."""
+    """Index-based callback — stays within 64-byte limit."""
     btns = [
         InlineKeyboardButton(
             text=tm["name"],
@@ -7528,8 +7583,8 @@ def _team_kb(teams: list, league_code: str, lang: str = "ar") -> InlineKeyboardM
         for i, tm in enumerate(teams[:24])
     ]
     rows = [btns[i:i+2] for i in range(0, len(btns), 2)]
-    back_lbl = "🔙 الدوريات" if lang == "ar" else "🔙 Leagues"
-    rows.append([InlineKeyboardButton(text=back_lbl, callback_data="fb:menu")])
+    back_lbl = "🔙 المباريات" if lang == "ar" else "🔙 Matches"
+    rows.append([InlineKeyboardButton(text=back_lbl, callback_data=f"fb:{league_code.lower()}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -7621,9 +7676,10 @@ async def _send_fixtures(target, league_code: str, lang: str) -> None:
     if not selection:
         await send(t("fb_no_live", lang))
         return
-    for f in selection[:8]:
-        kb = _card_kb(f)
-        await send(_card(f, lang), parse_mode="Markdown", reply_markup=kb)
+    league_ar = MAJOR_LEAGUES.get(league_code.upper(), {}).get("name_ar", league_code)
+    card = _matchday_card(selection[:12], league_ar, lang)
+    kb   = _matchday_kb(league_code.upper(), lang)
+    await send(card, parse_mode="Markdown", reply_markup=kb)
 
 
 async def _send_live(target, lang: str) -> None:
@@ -7635,9 +7691,13 @@ async def _send_live(target, lang: str) -> None:
     if not data:
         await send(t("fb_no_live", lang))
         return
-    for f in data[:8]:
-        kb = _card_kb(f)
-        await send(_card(f, lang), parse_mode="Markdown", reply_markup=kb)
+    by_league: dict[str, list] = {}
+    for f in data[:20]:
+        key = f.get("league_ar") or f.get("league", "Football")
+        by_league.setdefault(key, []).append(f)
+    for league_name, matches in by_league.items():
+        card = _matchday_card(matches, league_name, lang)
+        await send(card, parse_mode="Markdown")
 
 
 # ── command handler ────────────────────────────────────────────────────────────
@@ -7699,24 +7759,33 @@ async def handle_fb_cb(callback: CallbackQuery, lang: str = "en") -> None:
     if league_code not in MAJOR_LEAGUES:
         return
 
-    league_ar = MAJOR_LEAGUES[league_code]["name_ar"]
-    teams = await omega_football.get_league_teams(league_code)
+    await _send_fixtures(callback, league_code, lang)
 
-    if teams:
-        choose_lbl = "🏟️ اختر الفريق:" if lang == "ar" else "🏟️ Choose a team:"
-        text = f"⚽ *{league_ar}*\n\n{choose_lbl}"
-        try:
-            await callback.message.edit_text(
-                text, parse_mode="Markdown",
-                reply_markup=_team_kb(teams, league_code, lang),
-            )
-        except Exception:
-            await callback.message.answer(
-                text, parse_mode="Markdown",
-                reply_markup=_team_kb(teams, league_code, lang),
-            )
-    else:
-        await _send_fixtures(callback, league_code, lang)
+
+# ── callback: team list ───────────────────────────────────────────────────────
+
+@router.callback_query(lambda c: c.data and c.data.startswith("fb_teams:"))
+async def handle_fb_teams_cb(callback: CallbackQuery, lang: str = "en") -> None:
+    await callback.answer("⏳")
+    league_code = callback.data.split(":", 1)[1].upper()
+    league_ar   = MAJOR_LEAGUES.get(league_code, {}).get("name_ar", league_code)
+    teams = await omega_football.get_league_teams(league_code)
+    if not teams:
+        no_teams = "لا توجد فرق متاحة حالياً" if lang == "ar" else "No teams available right now"
+        await callback.answer(no_teams, show_alert=True)
+        return
+    choose_lbl = "🏟️ اختر الفريق:" if lang == "ar" else "🏟️ Choose a team:"
+    text = f"⚽ *{league_ar}*\n\n{choose_lbl}"
+    try:
+        await callback.message.edit_text(
+            text, parse_mode="Markdown",
+            reply_markup=_team_kb(teams, league_code, lang),
+        )
+    except Exception:
+        await callback.message.answer(
+            text, parse_mode="Markdown",
+            reply_markup=_team_kb(teams, league_code, lang),
+        )
 
 
 # ── callback: team schedule ───────────────────────────────────────────────────
@@ -7747,7 +7816,7 @@ async def handle_fb_team_cb(callback: CallbackQuery, lang: str = "en") -> None:
     back_lbl   = "🔙 الفرق"  if lang == "ar" else "🔙 Teams"
     reload_lbl = "🔄 تحديث"  if lang == "ar" else "🔄 Refresh"
     back_kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text=back_lbl,   callback_data=f"fb:{league_code.lower()}"),
+        InlineKeyboardButton(text=back_lbl,   callback_data=f"fb_teams:{league_code.lower()}"),
         InlineKeyboardButton(text=reload_lbl, callback_data=f"fb_t:{team_idx}:{league_code}"),
     ]])
     await callback.message.answer(card, parse_mode="Markdown", reply_markup=back_kb)

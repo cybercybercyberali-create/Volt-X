@@ -48,94 +48,81 @@ def _fmt_short_date(date_utc: str) -> str:
         return "—"
 
 
-# ── match card helpers ─────────────────────────────────────────────────────────
+# ── match overview card (all matches in one message) ──────────────────────────
 
-def _score_display(f: dict) -> str:
-    if f["status"] == "NS":
-        return "🆚"
-    h = f.get("home_score")
-    a = f.get("away_score")
-    return f"‹ {h if h is not None else '?'} - {a if a is not None else '?'} ›"
+def _matchday_card(fixtures: list, league_ar: str, lang: str = "ar") -> str:
+    """Format all matches as a single matchday overview — like football sites."""
+    SEP  = "──────────────"
+    live = [f for f in fixtures if f.get("status") in ("1H", "2H", "HT", "ET", "PEN")]
+    done = [f for f in fixtures if f.get("status") == "FT"]
+    ns   = [f for f in fixtures if f.get("status") == "NS"]
 
+    lines = [f"⚽ *{league_ar}*", SEP]
 
-def _status_line(f: dict, lang: str = "ar") -> str:
-    s = f.get("status", "NS")
-    el = f.get("status_elapsed")
-    if lang == "ar":
-        if s == "NS":              return "🗓️ موعد"
-        if s in ("1H", "2H"):     return f"🔴 مباشر '{el}"
-        if s == "HT":             return "⏸️ استراحة"
-        if s == "FT":             return "🏁 انتهت"
-        if s == "ET":             return "⚡ وقت إضافي"
-        if s == "PEN":            return "🎯 ضربات ترجيح"
-    else:
-        if s == "NS":              return "🗓️ Scheduled"
-        if s in ("1H", "2H"):     return f"🔴 Live '{el}"
-        if s == "HT":             return "⏸️ Half Time"
-        if s == "FT":             return "🏁 Finished"
-        if s == "ET":             return "⚡ Extra Time"
-        if s == "PEN":            return "🎯 Penalties"
-    return s
+    if live:
+        lbl = "🔴 *مباشر*" if lang == "ar" else "🔴 *Live*"
+        lines.append(lbl)
+        for f in live:
+            el   = f.get("status_elapsed", "")
+            tag  = f"  `{el}'`" if el else ""
+            h, a = f.get("home_score", 0), f.get("away_score", 0)
+            lines.append(f"  {f['home']}  `{h} – {a}`  {f['away']}{tag}")
+        lines.append(SEP)
 
+    if done:
+        lbl = "🏁 *انتهت*" if lang == "ar" else "🏁 *Finished*"
+        lines.append(lbl)
+        for f in done:
+            h, a = f.get("home_score", "?"), f.get("away_score", "?")
+            lines.append(f"  {f['home']}  `{h} – {a}`  {f['away']}")
+        lines.append(SEP)
 
-def _card(f: dict, lang: str = "ar") -> str:
-    dt     = _fmt_full(f.get("date_utc", ""), lang)
-    score  = _score_display(f)
-    status = _status_line(f, lang)
-    venue  = f.get("venue") or "—"
-    return (
-        f"⚽ *{f['league_ar']}*\n"
-        f"━━━━━━━━━━━━\n"
-        f"  {f['home']}\n"
-        f"  {score}\n"
-        f"  {f['away']}\n"
-        f"━━━━━━━━━━━━\n"
-        f"📅 {dt}\n"
-        f"{status}\n"
-        f"🏟️ {venue}"
-    )
+    if ns:
+        lbl = "🗓️ *المواعيد*" if lang == "ar" else "🗓️ *Scheduled*"
+        lines.append(lbl)
+        for f in ns:
+            time_s = _fmt_local(f.get("date_utc", ""))
+            date_s = _fmt_short_date(f.get("date_utc", ""))
+            lines.append(f"  `{date_s}  {time_s}`  {f['home']}  🆚  {f['away']}")
+
+    if not (live or done or ns):
+        lines.append("لا توجد مباريات متاحة" if lang == "ar" else "No matches available")
+
+    return "\n".join(lines)
 
 
-def _card_kb(f: dict) -> InlineKeyboardMarkup | None:
-    fid = f.get("fixture_id")
-    if fid and f.get("status") not in ("NS", "TBD"):
-        return InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="📋 أحداث | Events", callback_data=f"fb_ev:{fid}")
-        ]])
-    return None
+def _matchday_kb(league_code: str, lang: str = "ar") -> InlineKeyboardMarkup:
+    lc          = league_code.lower()
+    team_lbl    = "🔍 اختر فريقاً" if lang == "ar" else "🔍 Choose Team"
+    live_lbl    = "🔴 مباشر"       if lang == "ar" else "🔴 Live Now"
+    refresh_lbl = "🔄 تحديث"       if lang == "ar" else "🔄 Refresh"
+    back_lbl    = "🔙 الدوريات"    if lang == "ar" else "🔙 Leagues"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=team_lbl,    callback_data=f"fb_teams:{lc}")],
+        [InlineKeyboardButton(text=live_lbl,    callback_data="fb:live"),
+         InlineKeyboardButton(text=refresh_lbl, callback_data=f"fb:{lc}")],
+        [InlineKeyboardButton(text=back_lbl,    callback_data="fb:menu")],
+    ])
 
 
-def _fmt_events(events: list) -> str:
-    if not events:
-        return "لا توجد أحداث | No events recorded"
-    lines: list[str] = []
-    for ev in events:
-        ev_type = ev.get("type", "")
-        detail  = ev.get("detail", "")
-        elapsed = ev.get("elapsed", "?")
-        extra   = ev.get("extra")
-        player  = ev.get("player", "")
-        team    = ev.get("team", "")
-        time_str = f"`{elapsed}+{extra}'`" if extra else f"`{elapsed}'`"
+# ── team list keyboard ─────────────────────────────────────────────────────────
 
-        if ev_type == "Goal":
-            icon = "🔙" if "Own Goal" in detail else ("🎯" if "Penalty" in detail else "⚽")
-        elif ev_type == "Card":
-            icon = "🟥" if "Red" in detail else "🟨"
-        elif ev_type in ("subst", "Subst"):
-            icon = "🔄"
-        else:
-            icon = "📌"
-
-        line = f"  {icon} {time_str} *{player}*"
-        if team:
-            line += f"  _{team}_"
-        lines.append(line)
-
-    return "📋 *Match Events*\n\n" + "\n".join(lines)
+def _team_kb(teams: list, league_code: str, lang: str = "ar") -> InlineKeyboardMarkup:
+    """Index-based callback — stays within 64-byte limit."""
+    btns = [
+        InlineKeyboardButton(
+            text=tm["name"],
+            callback_data=f"fb_t:{i}:{league_code}",
+        )
+        for i, tm in enumerate(teams[:24])
+    ]
+    rows = [btns[i:i+2] for i in range(0, len(btns), 2)]
+    back_lbl = "🔙 المباريات" if lang == "ar" else "🔙 Matches"
+    rows.append([InlineKeyboardButton(text=back_lbl, callback_data=f"fb:{league_code.lower()}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-# ── keyboards ──────────────────────────────────────────────────────────────────
+# ── league selector keyboard ───────────────────────────────────────────────────
 
 def _league_kb(lang: str = "ar") -> InlineKeyboardMarkup:
     btns = [
@@ -145,21 +132,6 @@ def _league_kb(lang: str = "ar") -> InlineKeyboardMarkup:
     rows = [btns[i:i+2] for i in range(0, len(btns), 2)]
     live_lbl = "🔴 نتائج مباشرة" if lang == "ar" else "🔴 Live Now"
     rows.append([InlineKeyboardButton(text=live_lbl, callback_data="fb:live")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-def _team_kb(teams: list, league_code: str, lang: str = "ar") -> InlineKeyboardMarkup:
-    """Use index (0-based) as callback data — stays within 64-byte limit."""
-    btns = [
-        InlineKeyboardButton(
-            text=tm["name"],
-            callback_data=f"fb_t:{i}:{league_code}",
-        )
-        for i, tm in enumerate(teams[:24])
-    ]
-    rows = [btns[i:i+2] for i in range(0, len(btns), 2)]
-    back_lbl = "🔙 الدوريات" if lang == "ar" else "🔙 Leagues"
-    rows.append([InlineKeyboardButton(text=back_lbl, callback_data="fb:menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -220,6 +192,38 @@ def _team_schedule_card(sched: dict, team_name: str, league_ar: str, lang: str =
     return "\n".join(lines)
 
 
+# ── events card ────────────────────────────────────────────────────────────────
+
+def _fmt_events(events: list) -> str:
+    if not events:
+        return "لا توجد أحداث | No events recorded"
+    lines: list[str] = []
+    for ev in events:
+        ev_type = ev.get("type", "")
+        detail  = ev.get("detail", "")
+        elapsed = ev.get("elapsed", "?")
+        extra   = ev.get("extra")
+        player  = ev.get("player", "")
+        team    = ev.get("team", "")
+        time_str = f"`{elapsed}+{extra}'`" if extra else f"`{elapsed}'`"
+
+        if ev_type == "Goal":
+            icon = "🔙" if "Own Goal" in detail else ("🎯" if "Penalty" in detail else "⚽")
+        elif ev_type == "Card":
+            icon = "🟥" if "Red" in detail else "🟨"
+        elif ev_type in ("subst", "Subst"):
+            icon = "🔄"
+        else:
+            icon = "📌"
+
+        line = f"  {icon} {time_str} *{player}*"
+        if team:
+            line += f"  _{team}_"
+        lines.append(line)
+
+    return "📋 *Match Events*\n\n" + "\n".join(lines)
+
+
 # ── internal send helpers ──────────────────────────────────────────────────────
 
 def _today(fixtures: list) -> list:
@@ -233,12 +237,12 @@ def _nearest(fixtures: list) -> list:
         key=lambda f: f.get("date_utc", ""),
     )
     if upcoming:
-        return upcoming[:8]
+        return upcoming[:10]
     return sorted(
         [f for f in fixtures if f.get("status") == "FT"],
         key=lambda f: f.get("date_utc", ""),
         reverse=True,
-    )[:8]
+    )[:10]
 
 
 async def _send_fixtures(target, league_code: str, lang: str) -> None:
@@ -251,9 +255,10 @@ async def _send_fixtures(target, league_code: str, lang: str) -> None:
     if not selection:
         await send(t("fb_no_live", lang))
         return
-    for f in selection[:8]:
-        kb = _card_kb(f)
-        await send(_card(f, lang), parse_mode="Markdown", reply_markup=kb)
+    league_ar = MAJOR_LEAGUES.get(league_code.upper(), {}).get("name_ar", league_code)
+    card = _matchday_card(selection[:12], league_ar, lang)
+    kb   = _matchday_kb(league_code.upper(), lang)
+    await send(card, parse_mode="Markdown", reply_markup=kb)
 
 
 async def _send_live(target, lang: str) -> None:
@@ -265,9 +270,14 @@ async def _send_live(target, lang: str) -> None:
     if not data:
         await send(t("fb_no_live", lang))
         return
-    for f in data[:8]:
-        kb = _card_kb(f)
-        await send(_card(f, lang), parse_mode="Markdown", reply_markup=kb)
+    # Group by league for a clean overview
+    by_league: dict[str, list] = {}
+    for f in data[:20]:
+        key = f.get("league_ar") or f.get("league", "Football")
+        by_league.setdefault(key, []).append(f)
+    for league_name, matches in by_league.items():
+        card = _matchday_card(matches, league_name, lang)
+        await send(card, parse_mode="Markdown")
 
 
 # ── command handler ────────────────────────────────────────────────────────────
@@ -329,24 +339,34 @@ async def handle_fb_cb(callback: CallbackQuery, lang: str = "en") -> None:
     if league_code not in MAJOR_LEAGUES:
         return
 
-    league_ar = MAJOR_LEAGUES[league_code]["name_ar"]
-    teams = await omega_football.get_league_teams(league_code)
+    # Always show match overview first; team list is via the "Choose Team" button
+    await _send_fixtures(callback, league_code, lang)
 
-    if teams:
-        choose_lbl = "🏟️ اختر الفريق:" if lang == "ar" else "🏟️ Choose a team:"
-        text = f"⚽ *{league_ar}*\n\n{choose_lbl}"
-        try:
-            await callback.message.edit_text(
-                text, parse_mode="Markdown",
-                reply_markup=_team_kb(teams, league_code, lang),
-            )
-        except Exception:
-            await callback.message.answer(
-                text, parse_mode="Markdown",
-                reply_markup=_team_kb(teams, league_code, lang),
-            )
-    else:
-        await _send_fixtures(callback, league_code, lang)
+
+# ── callback: team list (from matchday keyboard) ───────────────────────────────
+
+@router.callback_query(lambda c: c.data and c.data.startswith("fb_teams:"))
+async def handle_fb_teams_cb(callback: CallbackQuery, lang: str = "en") -> None:
+    await callback.answer("⏳")
+    league_code = callback.data.split(":", 1)[1].upper()
+    league_ar   = MAJOR_LEAGUES.get(league_code, {}).get("name_ar", league_code)
+    teams = await omega_football.get_league_teams(league_code)
+    if not teams:
+        no_teams = "لا توجد فرق متاحة حالياً" if lang == "ar" else "No teams available right now"
+        await callback.answer(no_teams, show_alert=True)
+        return
+    choose_lbl = "🏟️ اختر الفريق:" if lang == "ar" else "🏟️ Choose a team:"
+    text = f"⚽ *{league_ar}*\n\n{choose_lbl}"
+    try:
+        await callback.message.edit_text(
+            text, parse_mode="Markdown",
+            reply_markup=_team_kb(teams, league_code, lang),
+        )
+    except Exception:
+        await callback.message.answer(
+            text, parse_mode="Markdown",
+            reply_markup=_team_kb(teams, league_code, lang),
+        )
 
 
 # ── callback: team schedule ───────────────────────────────────────────────────
@@ -377,7 +397,7 @@ async def handle_fb_team_cb(callback: CallbackQuery, lang: str = "en") -> None:
     back_lbl   = "🔙 الفرق"  if lang == "ar" else "🔙 Teams"
     reload_lbl = "🔄 تحديث"  if lang == "ar" else "🔄 Refresh"
     back_kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text=back_lbl,   callback_data=f"fb:{league_code.lower()}"),
+        InlineKeyboardButton(text=back_lbl,   callback_data=f"fb_teams:{league_code.lower()}"),
         InlineKeyboardButton(text=reload_lbl, callback_data=f"fb_t:{team_idx}:{league_code}"),
     ]])
     await callback.message.answer(card, parse_mode="Markdown", reply_markup=back_kb)
