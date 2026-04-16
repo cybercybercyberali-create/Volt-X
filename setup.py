@@ -4268,7 +4268,7 @@ class OmegaFuel:
                 (r'UNL\s*95[\s\S]{0,40}?([\d,]{7,})\s*(?:L\.?L\.?|ل\.?ل\.?|LBP|LL)', 'بنزين 95'),
                 (r'UNL\s*98[\s\S]{0,40}?([\d,]{7,})\s*(?:L\.?L\.?|ل\.?ل\.?|LBP|LL)', 'بنزين 98'),
                 (r'Diesel[\s\S]{0,40}?([\d,]{7,})\s*(?:L\.?L\.?|ل\.?ل\.?|LBP|LL)', 'ديزل'),
-                (r'Gas\s*(?:Oil|\(LPG\)|LPG)?[\s\S]{0,40}?([\d,]{7,})\s*(?:L\.?L\.?|ل\.?ل\.?|LBP|LL)', 'غاز'),
+                (r'Gas\s*(?:Oil|\(LPG\)|LPG)?[\s\S]{0,40}?([\d,]{7,})\s*(?:L\.?L\.?|ل\.?ل\.?|LBP|LL)', 'غاز 10kg'),
                 (r'Kerosene[\s\S]{0,40}?([\d,]{7,})\s*(?:L\.?L\.?|ل\.?ل\.?|LBP|LL)', 'كيروسين'),
                 (r'(?:بنزين|Benzine)\s*95[\s\S]{0,40}?([\d,]{7,})', 'بنزين 95'),
                 (r'(?:بنزين|Benzine)\s*98[\s\S]{0,40}?([\d,]{7,})', 'بنزين 98'),
@@ -4295,25 +4295,58 @@ class OmegaFuel:
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
                 "Chrome/124.0.0.0 Safari/537.36"
             ),
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "ar,en;q=0.9",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9,ar;q=0.8",
             "Accept-Encoding": "gzip, deflate, br",
             "Cache-Control": "no-cache",
             "Pragma": "no-cache",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Upgrade-Insecure-Requests": "1",
         }
 
-        # Source 0: IPT Group — try multiple URL variants
+        # Source 0: IPT Group — correct URL + fallbacks
         ipt_urls = [
-            "https://www.iptgroup.com.lb/ipt/e",
-            "https://iptgroup.com.lb/ipt/e",
+            "https://www.iptgroup.com.lb/ipt/en/our-stations/fuel-prices",
+            "https://iptgroup.com.lb/ipt/en/our-stations/fuel-prices",
+            "https://www.iptgroup.com.lb/ipt/ar/our-stations/fuel-prices",
             "https://www.iptgroup.com.lb/",
-            "https://iptgroup.com.lb/",
         ]
         for url in ipt_urls:
             try:
                 html = await self._scraper.fetch_html(url, headers=_BROWSER)
                 if not html or len(html) < 500:
                     continue
+
+                # Many React/Next.js sites embed initial state in <script> tags
+                # Look for JSON data like {"fuelPrices":[...]} or window.__NEXT_DATA__
+                json_match = re.search(
+                    r'(?:__NEXT_DATA__|__NUXT__|window\.__data__|initialState)\s*[=:]\s*(\{.{20,})',
+                    html, re.DOTALL
+                )
+                if json_match:
+                    import json as _json
+                    raw_json = json_match.group(1)
+                    # Find end of JSON object (balanced braces)
+                    depth, end = 0, 0
+                    for i, ch in enumerate(raw_json[:50000]):
+                        if ch == '{': depth += 1
+                        elif ch == '}':
+                            depth -= 1
+                            if depth == 0:
+                                end = i + 1
+                                break
+                    try:
+                        obj = _json.loads(raw_json[:end])
+                        obj_str = str(obj)
+                        prices = _extract_llp_prices(obj_str)
+                        if len(prices) >= 2:
+                            logger.info(f"IPT JSON embed prices from {url}: {prices}")
+                            return prices
+                    except Exception:
+                        pass
+
                 # Strip HTML tags for regex matching
                 plain = re.sub(r'<[^>]+>', ' ', html)
                 prices = _extract_llp_prices(plain)
