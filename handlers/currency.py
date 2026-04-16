@@ -112,12 +112,9 @@ def _parse_conversion(text: str) -> dict | None:
     if len(seen) >= 2:
         return {"base": seen[0][1], "target": seen[1][1], "amount": amount}
     if len(seen) == 1:
-        # Single currency — context decides direction
-        # "ما سعر الدولار" → USD vs multi
+        # Single currency → show multi-rate with it as base
         code = seen[0][1]
-        if code == "USD":
-            return None  # default multi-rate view
-        return {"base": "USD", "target": code, "amount": amount}
+        return {"base": code, "target": None, "amount": amount}
     return None
 
 
@@ -162,17 +159,19 @@ async def _send_pair(message: Message, base: str, target: str,
 
 
 _QUICK_PAIRS = [
-    ("USD", "LBP"), ("USD", "EUR"), ("USD", "GBP"),
-    ("USD", "TRY"), ("USD", "EGP"), ("EUR", "USD"),
-    ("USD", "SAR"), ("USD", "AED"),
+    # USD base
+    ("USD", "LBP"), ("USD", "EUR"), ("USD", "SAR"), ("USD", "AED"),
+    # EUR base
+    ("EUR", "USD"), ("EUR", "GBP"), ("EUR", "TRY"), ("EUR", "LBP"),
+    # other
+    ("GBP", "USD"), ("SAR", "USD"), ("USD", "EGP"), ("USD", "TRY"),
 ]
 
 
 def _currency_quick_kb() -> InlineKeyboardMarkup:
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     btns = [
-        InlineKeyboardButton(text=f"{b}→{t}", callback_data=f"cur_q:{b}:{t}")
-        for b, t in _QUICK_PAIRS
+        InlineKeyboardButton(text=f"{b}→{tgt}", callback_data=f"cur_q:{b}:{tgt}")
+        for b, tgt in _QUICK_PAIRS
     ]
     rows = [btns[i:i+4] for i in range(0, len(btns), 4)]
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -201,8 +200,11 @@ async def cmd_currency(message: Message, lang: str = "en") -> None:
     # ── Natural language ──────────────────────────────────────────────────────
     parsed = _parse_conversion(raw)
     if parsed:
-        await _send_pair(message, parsed["base"], parsed["target"],
-                         parsed["amount"], lang)
+        if parsed.get("target"):
+            await _send_pair(message, parsed["base"], parsed["target"],
+                             parsed["amount"], lang)
+        else:
+            await _send_multi(message, parsed["base"], lang)
     else:
         # Button tap with no specific pair — show prompt + quick-select keyboard
         hint = (

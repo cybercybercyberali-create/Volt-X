@@ -463,6 +463,57 @@ class OmegaFootball:
         await cache.set(cache_key, result, ttl=60 if live else 300)
         return result
 
+    async def get_team_schedule_by_name(self, team_name: str, league_code: str = "") -> dict:
+        """Scan Sofascore daily events to build team schedule — no Sofascore team ID needed."""
+        cache_key = f"sfsc:tsched_name:{league_code}:{team_name}"
+        cached = await cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        from datetime import date, timedelta
+        today = date.today()
+        sf_id = _SF_TOURNAMENT_IDS.get(league_code.upper()) if league_code else None
+        team_lower = team_name.lower()
+
+        past: list[dict] = []
+        upcoming: list[dict] = []
+        live: list[dict] = []
+
+        for delta in range(-20, 10):
+            day = (today + timedelta(days=delta)).strftime("%Y-%m-%d")
+            events = await self._sofascore_raw_day(day)
+            for ev in events:
+                if sf_id and ev.get("tournament", {}).get("id") != sf_id:
+                    continue
+                home = ev.get("homeTeam", {}).get("name", "")
+                away = ev.get("awayTeam", {}).get("name", "")
+                if team_lower not in (home.lower(), away.lower()):
+                    continue
+                n = _normalize_sofascore(ev)
+                if not n:
+                    continue
+                status = n.get("status", "NS")
+                if status in ("1H", "2H", "HT", "ET", "PEN"):
+                    live.append(n)
+                elif status == "FT":
+                    past.append(n)
+                else:
+                    upcoming.append(n)
+
+        past.sort(key=lambda x: x.get("date_utc", ""), reverse=True)
+        upcoming.sort(key=lambda x: x.get("date_utc", ""))
+
+        has_data = bool(past or live or upcoming)
+        result = {
+            "past": past[:5],
+            "live": live,
+            "upcoming": upcoming[:5],
+            "error": not has_data,
+        }
+        if has_data:
+            await cache.set(cache_key, result, ttl=60 if live else 300)
+        return result
+
     async def get_events(self, fixture_id: int) -> list | dict:
         """Fetch match events: goals, cards, substitutions."""
         cache_key = f"apifb:events:{fixture_id}"

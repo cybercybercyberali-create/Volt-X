@@ -191,6 +191,46 @@ class OmegaMovies:
             logger.debug(f"OMDb error: {exc}")
         return None
 
+    async def get_by_genre(self, genre_id: int, lang: str = "en") -> dict[str, Any]:
+        """Get top movies by TMDB genre ID using discover endpoint."""
+        cache_key = f"movie:genre:{genre_id}:{lang}"
+        cached = await cache.get(cache_key)
+        if cached:
+            return cached
+        try:
+            tmdb_lang = "ar" if lang == "ar" else "en-US"
+            data = await self._tmdb.get(
+                "/discover/movie",
+                params={
+                    "api_key": settings.tmdb_api_key,
+                    "with_genres": genre_id,
+                    "sort_by": "popularity.desc",
+                    "language": tmdb_lang,
+                    "vote_count.gte": 200,
+                    "page": 1,
+                },
+            )
+            if data and "results" in data:
+                results = [
+                    {
+                        "id": item["id"],
+                        "title": item.get("title") or item.get("name", ""),
+                        "overview": (item.get("overview") or "")[:200],
+                        "release_date": item.get("release_date") or item.get("first_air_date", ""),
+                        "vote_average": round(item.get("vote_average", 0), 1),
+                        "genres": [_GENRE_MAP[g] for g in item.get("genre_ids", []) if g in _GENRE_MAP][:3],
+                        "media_type": "movie",
+                    }
+                    for item in data["results"][:10]
+                    if item.get("vote_average", 0) >= 6.0
+                ]
+                result = {"results": results, "error": False}
+                await cache.set(cache_key, result, ttl=CACHE_TTL["movies"])
+                return result
+        except Exception as exc:
+            logger.debug(f"get_by_genre error: {exc}")
+        return {"results": [], "error": True}
+
     async def _search_anime(self, query: str) -> Optional[dict]:
         """Search anime using Jikan (MyAnimeList)."""
         try:

@@ -134,37 +134,19 @@ def _fuel_country_kb(lang: str = "ar") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-@router.message(Command("fuel"))
-async def cmd_fuel(message: Message, lang: str = "en") -> None:
-    args = message.text.split()[1:] if message.text else []
-    # Only accept a valid 2-letter country code; ignore natural language words
-    country = None
-    if args:
-        candidate = args[0].upper()
-        if len(candidate) == 2 and candidate.isalpha():
-            country = candidate
-
-    # No country specified → show selector keyboard
-    if not country:
-        prompt = "⛽ *اختر الدولة:*" if lang == "ar" else "⛽ *Select a country:*"
-        await message.answer(prompt, parse_mode="Markdown", reply_markup=_fuel_country_kb(lang))
-        return
-
-    await message.answer(t("fetching", lang))
+async def _show_fuel(send_to: Message, country: str, lang: str) -> None:
+    """Core fuel display — shared by command and callback."""
+    await send_to.answer(t("fetching", lang))
     try:
         data = await omega_fuel.get_prices(country)
 
-        # ── Lebanon: render the rich visual card ──────────────────────────────
+        # ── Lebanon: rich visual card ─────────────────────────────────────────
         if country == "LB":
             prices_raw = data.get("prices", {}) if not data.get("error") else {}
-
-            # Fetch LBP/USD rate early (needed for GPP conversion below)
             rate = await _fetch_exchange_rate()
-
             source_label = "IPT Group"
             ago = "—"
 
-            # Keep LBP-formatted prices (contain ل.ل / LL / LBP), then normalize keys
             lbp_prices = {
                 k: v for k, v in prices_raw.items()
                 if k != "note"
@@ -174,7 +156,6 @@ async def cmd_fuel(message: Message, lang: str = "en") -> None:
             prices_real = _normalize_fuel_keys(lbp_prices)
 
             if not _has_canonical_prices(prices_real):
-                # Try GPP USD prices → convert to LBP with canonical Arabic names
                 gpp_prices = {k: v for k, v in prices_raw.items()
                               if k != "note" and "USD" in str(v)
                               and any(c.isdigit() for c in str(v))}
@@ -193,8 +174,6 @@ async def cmd_fuel(message: Message, lang: str = "en") -> None:
                         source_label = "GlobalPetrolPrices"
 
             if not _has_canonical_prices(prices_real):
-                # Static fallback — IPT Group weekly prices (أبريل 2026)
-                # تُحدَّث يدوياً كل أسبوع من موقع IPT Group
                 prices_real = {
                     "بنزين 98": "2,427,000 ل.ل.",
                     "بنزين 95": "2,386,000 ل.ل.",
@@ -211,43 +190,52 @@ async def cmd_fuel(message: Message, lang: str = "en") -> None:
                 source=source_label,
                 ago=ago,
             )
-            await message.answer(card_text, parse_mode="Markdown")
+            await send_to.answer(card_text, parse_mode="Markdown")
             return
 
-        # ── Other countries: simple plain display ─────────────────────────────
+        # ── Other countries: simple display ──────────────────────────────────
         if data.get("error"):
-            await message.answer(t("error", lang))
+            await send_to.answer(t("error", lang))
             return
 
         name = data.get("country_name_ar", data.get("country_name_en", country))
         text = t("fuel_title_country", lang, country=name) + "\n\n"
-
         prices = data.get("prices", {})
         if isinstance(prices, dict):
             for fuel_type, price in prices.items():
                 if fuel_type != "note":
                     text += f"  🔹 {fuel_type}: {price}\n"
-
         if data.get("note"):
             text += f"\n{t('label_note', lang)}: {data['note']}"
-
-        await message.answer(text, parse_mode="Markdown")
+        await send_to.answer(text, parse_mode="Markdown")
 
     except Exception as exc:
-        logger.error(f"Fuel error: {exc}", exc_info=True)
-        await message.answer(t("error", lang))
+        logger.error(f"Fuel error for {country}: {exc}", exc_info=True)
+        await send_to.answer(t("error", lang))
+
+
+@router.message(Command("fuel"))
+async def cmd_fuel(message: Message, lang: str = "en") -> None:
+    args = message.text.split()[1:] if message.text else []
+    country = None
+    if args:
+        candidate = args[0].upper()
+        if len(candidate) == 2 and candidate.isalpha():
+            country = candidate
+
+    if not country:
+        prompt = "⛽ *اختر الدولة:*" if lang == "ar" else "⛽ *Select a country:*"
+        await message.answer(prompt, parse_mode="Markdown", reply_markup=_fuel_country_kb(lang))
+        return
+
+    await _show_fuel(message, country, lang)
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("fuel_c:"))
 async def handle_fuel_country_cb(callback: CallbackQuery, lang: str = "en") -> None:
     await callback.answer("⏳")
     country = callback.data.split(":", 1)[1].upper()
-    # Simulate a /fuel {country} message by calling the same logic
-    # Patch message.text so cmd_fuel parses the country
-    original_text = callback.message.text or ""
-    callback.message.text = f"/fuel {country}"
-    await cmd_fuel(callback.message, lang=lang)
-    callback.message.text = original_text
+    await _show_fuel(callback.message, country, lang)
 
 
 def register_fuel_handlers(dp) -> None:
