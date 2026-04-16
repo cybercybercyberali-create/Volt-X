@@ -43,6 +43,66 @@ _SF_HEADERS: dict[str, str] = {
     "Referer": "https://www.sofascore.com/",
 }
 
+# Hardcoded team lists (2024-25 seasons) — last-resort fallback when every
+# live source (Sofascore standings + day scan) fails or returns empty.
+_FALLBACK_TEAMS: dict[str, list[str]] = {
+    "PL": [
+        "Arsenal", "Aston Villa", "Bournemouth", "Brentford", "Brighton",
+        "Chelsea", "Crystal Palace", "Everton", "Fulham", "Ipswich Town",
+        "Leicester City", "Liverpool", "Manchester City", "Manchester United",
+        "Newcastle United", "Nottingham Forest", "Southampton", "Tottenham",
+        "West Ham", "Wolverhampton",
+    ],
+    "PD": [
+        "Alavés", "Athletic Club", "Atlético Madrid", "Barcelona", "Real Betis",
+        "Celta Vigo", "Espanyol", "Getafe", "Girona", "Las Palmas",
+        "Leganés", "Mallorca", "Osasuna", "Rayo Vallecano", "Real Madrid",
+        "Real Sociedad", "Sevilla", "Valencia", "Valladolid", "Villarreal",
+    ],
+    "SA": [
+        "Atalanta", "Bologna", "Cagliari", "Como", "Empoli",
+        "Fiorentina", "Genoa", "Hellas Verona", "Inter", "Juventus",
+        "Lazio", "Lecce", "Milan", "Monza", "Napoli",
+        "Parma", "Roma", "Torino", "Udinese", "Venezia",
+    ],
+    "BL1": [
+        "Augsburg", "Bayer Leverkusen", "Bayern München", "Bochum", "Borussia Dortmund",
+        "Borussia Mönchengladbach", "Eintracht Frankfurt", "FC St. Pauli", "Freiburg",
+        "Heidenheim", "Hoffenheim", "Holstein Kiel", "Mainz 05", "RB Leipzig",
+        "Stuttgart", "Union Berlin", "Werder Bremen", "Wolfsburg",
+    ],
+    "FL1": [
+        "Angers", "Auxerre", "Brest", "Le Havre", "Lens",
+        "Lille", "Lyon", "Marseille", "Monaco", "Montpellier",
+        "Nantes", "Nice", "Paris Saint-Germain", "Reims", "Rennes",
+        "Saint-Étienne", "Strasbourg", "Toulouse",
+    ],
+    "SPL": [
+        "Al-Ahli", "Al-Ettifaq", "Al-Fateh", "Al-Fayha", "Al-Hilal",
+        "Al-Ittihad", "Al-Kholood", "Al-Nassr", "Al-Okhdood", "Al-Orobah",
+        "Al-Qadsiah", "Al-Raed", "Al-Riyadh", "Al-Shabab", "Al-Taawoun",
+        "Al-Wehda", "Damac", "Al-Khaleej",
+    ],
+    "ELC": [
+        "Blackburn", "Bristol City", "Burnley", "Cardiff City", "Coventry City",
+        "Derby County", "Hull City", "Leeds United", "Luton Town", "Middlesbrough",
+        "Millwall", "Norwich City", "Oxford United", "Plymouth Argyle",
+        "Portsmouth", "Preston North End", "Queens Park Rangers", "Sheffield United",
+        "Sheffield Wednesday", "Stoke City", "Sunderland", "Swansea City",
+        "Watford", "West Bromwich Albion",
+    ],
+    "CL": [
+        "Real Madrid", "Manchester City", "Bayern München", "Paris Saint-Germain",
+        "Liverpool", "Arsenal", "Barcelona", "Inter", "Borussia Dortmund",
+        "Atlético Madrid", "RB Leipzig", "Bayer Leverkusen", "Milan", "Juventus",
+        "Celtic", "Feyenoord", "PSV Eindhoven", "Benfica", "Sporting CP",
+        "Atalanta", "Aston Villa", "Monaco", "Brest", "Lille",
+        "Club Brugge", "Young Boys", "Shakhtar Donetsk", "Dinamo Zagreb",
+        "Red Star Belgrade", "Sparta Prague", "Slovan Bratislava", "Sturm Graz",
+        "Girona", "Salzburg", "Bologna", "Stuttgart",
+    ],
+}
+
 
 def _headers() -> dict:
     return {
@@ -434,6 +494,12 @@ class OmegaFootball:
                         if tid and tname:
                             team_dict[tid] = tname
             teams = sorted([{"id": k, "name": v} for k, v in team_dict.items()], key=lambda x: x["name"])
+
+        # Last resort: hardcoded team list (offline / blocked scenarios)
+        if not teams:
+            fb = _FALLBACK_TEAMS.get(league_code.upper())
+            if fb:
+                teams = [{"id": i, "name": n} for i, n in enumerate(sorted(fb))]
 
         if teams:
             await cache.set(cache_key, teams, ttl=3600 * 24)
