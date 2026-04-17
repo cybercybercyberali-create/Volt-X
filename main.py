@@ -87,6 +87,12 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(_self_ping())
         logger.info("✅ Self-ping task started (free plan)")
 
+    asyncio.create_task(_fuel_refresh_loop())
+    logger.info("✅ Fuel auto-refresh task started (24 h interval)")
+
+    # Clear stale team-list caches so new sources (TheSportsDB + fallback) are tried
+    asyncio.create_task(_clear_stale_team_caches())
+
     from workers.notification_worker import notification_worker
     await notification_worker.start(bot)
 
@@ -163,6 +169,36 @@ async def health_check():
 @app.get("/")
 async def root():
     return {"message": "Omega Bot is running!", "plan": RENDER_PLAN}
+
+
+async def _clear_stale_team_caches():
+    """Delete cached empty team lists so TheSportsDB / fallback are used on next request."""
+    from services.cache_service import cache as _cache
+    from api_clients.omega_football import MAJOR_LEAGUES
+    await asyncio.sleep(5)
+    for code in MAJOR_LEAGUES:
+        key = f"sfsc:league_teams:{code.upper()}"
+        existing = await _cache.get(key)
+        if existing is not None and not existing:   # empty list cached
+            await _cache.delete(key)
+            logger.info(f"Cleared empty team cache for {code}")
+
+
+async def _fuel_refresh_loop():
+    """Fetch Lebanon fuel prices once at startup then every 24 h."""
+    from api_clients.omega_fuel import omega_fuel
+    await asyncio.sleep(15)          # let the bot fully boot first
+    while True:
+        try:
+            result = await omega_fuel.get_prices("LB", force=True)
+            if result and not result.get("error"):
+                pub = result.get("published_date") or result.get("scraped_at", "")[:10]
+                logger.info(f"✅ Fuel LB refreshed — date: {pub}")
+            else:
+                logger.warning("⚠️ Fuel LB refresh returned no data")
+        except Exception as exc:
+            logger.warning(f"Fuel refresh error: {exc}")
+        await asyncio.sleep(86400)   # 24 hours
 
 
 async def _self_ping():

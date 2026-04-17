@@ -581,7 +581,7 @@ class OmegaFootball:
             return []
         cache_key = f"sfsc:league_teams:{league_code.upper()}"
         cached = await cache.get(cache_key)
-        if cached is not None:
+        if cached:   # falsy check rejects empty lists from broken prior fetches
             return cached
 
         teams: list[dict] = []

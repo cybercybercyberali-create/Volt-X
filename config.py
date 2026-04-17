@@ -238,7 +238,7 @@ CACHE_TTL = {
     "news": 1800,
     "movies": 86400,
     "fuel": 21600,
-    "fuel_lebanon": 604800,
+    "fuel_lebanon": 86400,
     "ai_factual": 3600,
     "ai_creative": 86400,
     "flights": 300,
