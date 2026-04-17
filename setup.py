@@ -170,6 +170,7 @@ class Settings(BaseSettings):
     metals_api_key: str = Field(default="", alias="METALS_API_KEY")
     goldapi_key: str = Field(default="", alias="GOLDAPI_KEY")
     exchange_rate_key: str = Field(default="", alias="EXCHANGE_RATE_KEY")
+    scraper_api_key: str = Field(default="", alias="SCRAPER_API_KEY")
 
     # ━━━ Optional Keys ━━━
     omdb_api_key: str = Field(default="", alias="OMDB_API_KEY")
@@ -4437,6 +4438,34 @@ class OmegaFuel:
             "Sec-Fetch-Site": "none",
             "Upgrade-Insecure-Requests": "1",
         }
+
+        # Source 0a: ScraperAPI proxy — bypasses Render IP block (~1 credit/call)
+        _skey = getattr(settings, "scraper_api_key", "") or ""
+        if _skey:
+            import httpx as _httpx
+            for _ipt_url in [
+                "https://www.iptgroup.com.lb/ipt/en/our-stations/fuel-prices",
+                "https://iptgroup.com.lb/ipt/en/our-stations/fuel-prices",
+            ]:
+                try:
+                    async with _httpx.AsyncClient(timeout=30.0) as _cl:
+                        _r = await _cl.get(
+                            "https://api.scraperapi.com/",
+                            params={"api_key": _skey, "url": _ipt_url, "render": "true"},
+                        )
+                        if _r.status_code == 200 and len(_r.text) > 500:
+                            _plain = re.sub(r'<[^>]+>', ' ', _r.text)
+                            _prices = _extract_llp_prices(_plain)
+                            if not _prices:
+                                _prices = _extract_llp_prices(_r.text)
+                            if len(_prices) >= 2:
+                                _pub = _extract_date(_plain)
+                                _prices["__scraped_at__"] = _NOW_ISO
+                                _prices["__published_date__"] = _pub
+                                logger.info(f"ScraperAPI IPT prices: {_prices}")
+                                return _prices
+                except Exception as _exc:
+                    logger.debug(f"ScraperAPI IPT error ({_ipt_url}): {_exc}")
 
         # Source 0: IPT Group — correct URL + fallbacks
         ipt_urls = [
