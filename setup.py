@@ -4956,6 +4956,12 @@ _FALLBACK_TEAMS: dict[str, list[str]] = {
 }
 
 
+def _sf_tid(ev: dict) -> int | None:
+    """Get the uniqueTournament ID from a Sofascore event (not the stage/round ID)."""
+    t = ev.get("tournament", {})
+    return t.get("uniqueTournament", {}).get("id") or t.get("id")
+
+
 def _headers() -> dict:
     return {
         "X-RapidAPI-Key": settings.api_football_key,
@@ -5092,7 +5098,7 @@ class OmegaFootball:
                 d = (today + timedelta(days=delta)).strftime("%Y-%m-%d")
                 events = await self._sofascore_raw_day(d)
                 for ev in events:
-                    if ev.get("tournament", {}).get("id") != sf_id:
+                    if _sf_tid(ev) != sf_id:
                         continue
                     n = _normalize_sofascore(ev)
                     if n:
@@ -5282,7 +5288,7 @@ class OmegaFootball:
         events = await self._sofascore_raw_day(date_str)
         if events:
             _SF_LEAGUE_IDS = set(_SF_TOURNAMENT_IDS.values())
-            filtered = [e for e in events if e.get("tournament", {}).get("id") in _SF_LEAGUE_IDS]
+            filtered = [e for e in events if _sf_tid(e) in _SF_LEAGUE_IDS]
             if not filtered:
                 return {"error": True}
             fixtures = [_normalize_sofascore(e) for e in filtered[:20]]
@@ -5338,7 +5344,7 @@ class OmegaFootball:
                 day = (today + timedelta(days=delta)).strftime("%Y-%m-%d")
                 events = await self._sofascore_raw_day(day)
                 for ev in events:
-                    if ev.get("tournament", {}).get("id") != sf_id:
+                    if _sf_tid(ev) != sf_id:
                         continue
                     for side in ("homeTeam", "awayTeam"):
                         t = ev.get(side, {})
@@ -5429,7 +5435,7 @@ class OmegaFootball:
             day = (today + timedelta(days=delta)).strftime("%Y-%m-%d")
             events = await self._sofascore_raw_day(day)
             for ev in events:
-                if sf_id and ev.get("tournament", {}).get("id") != sf_id:
+                if sf_id and _sf_tid(ev) != sf_id:
                     continue
                 home = ev.get("homeTeam", {}).get("name", "")
                 away = ev.get("awayTeam", {}).get("name", "")
