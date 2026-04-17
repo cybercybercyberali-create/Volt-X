@@ -408,26 +408,10 @@ class OmegaFuel:
 
         result: dict[str, dict] = {}
 
-        from config import settings as _gcfg
-        _gskey = getattr(_gcfg, "scraper_api_key", "") or ""
-
         for fuel_key, url_path in [("gasoline", "gasoline_prices"), ("diesel", "diesel_prices")]:
             url = f"https://www.globalpetrolprices.com/{url_path}/"
             try:
                 html = await self._scraper.fetch_html(url, headers=_GPP_BROWSER_HEADERS)
-                if (not html or len(html) < 2000) and _gskey:
-                    import httpx as _ghx
-                    try:
-                        async with _ghx.AsyncClient(timeout=15.0) as _gc:
-                            _gr = await _gc.get(
-                                "https://api.scraperapi.com/",
-                                params={"api_key": _gskey, "url": url},
-                            )
-                            if _gr.status_code == 200 and len(_gr.text) > 2000:
-                                html = _gr.text
-                                logger.info(f"ScraperAPI GPP {fuel_key} OK")
-                    except Exception as _ge:
-                        logger.debug(f"ScraperAPI GPP error: {_ge}")
                 if not html or len(html) < 2000:
                     continue
                 soup = BeautifulSoup(html, "lxml")

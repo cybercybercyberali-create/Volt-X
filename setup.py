@@ -4601,25 +4601,10 @@ class OmegaFuel:
 
         result: dict[str, dict] = {}
 
-        _gskey = getattr(settings, "scraper_api_key", "") or ""
-
         for fuel_key, url_path in [("gasoline", "gasoline_prices"), ("diesel", "diesel_prices")]:
             url = f"https://www.globalpetrolprices.com/{url_path}/"
             try:
                 html = await self._scraper.fetch_html(url, headers=_GPP_BROWSER_HEADERS)
-                if (not html or len(html) < 2000) and _gskey:
-                    import httpx as _ghx
-                    try:
-                        async with _ghx.AsyncClient(timeout=15.0) as _gc:
-                            _gr = await _gc.get(
-                                "https://api.scraperapi.com/",
-                                params={"api_key": _gskey, "url": url},
-                            )
-                            if _gr.status_code == 200 and len(_gr.text) > 2000:
-                                html = _gr.text
-                                logger.info(f"ScraperAPI GPP {fuel_key} OK")
-                    except Exception as _ge:
-                        logger.debug(f"ScraperAPI GPP error: {_ge}")
                 if not html or len(html) < 2000:
                     continue
                 soup = BeautifulSoup(html, "lxml")
@@ -7689,7 +7674,10 @@ async def _show_fuel(send_to: Message, country: str, lang: str) -> None:
                 source=source_label,
                 ago=ago,
             )
-            await send_to.answer(card_text, parse_mode="Markdown")
+            try:
+                await send_to.answer(card_text, parse_mode="Markdown")
+            except Exception:
+                await send_to.answer(card_text)
             return
 
         # ── Other countries: simple display ──────────────────────────────────
@@ -9630,6 +9618,7 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(_self_ping())
         logger.info("✅ Self-ping task started (free plan)")
 
+    asyncio.create_task(_clear_fuel_caches())
     asyncio.create_task(_fuel_refresh_loop())
     logger.info("✅ Fuel auto-refresh task started (24 h interval)")
 
@@ -9711,6 +9700,18 @@ async def health_check():
 @app.get("/")
 async def root():
     return {"message": "Omega Bot is running!", "plan": RENDER_PLAN}
+
+
+async def _clear_fuel_caches():
+    """Clear all cached fuel data at startup so stale/bad results are discarded."""
+    from services.cache_service import cache as _cache
+    from api_clients.omega_fuel import ARAB_FUEL_SOURCES
+    await asyncio.sleep(3)
+    keys_to_clear = [f"fuel:{code}" for code in ARAB_FUEL_SOURCES]
+    keys_to_clear += ["fuel:US","fuel:DE","fuel:FR","fuel:GB","fuel:JP","fuel:IN","fuel:BR","fuel:RU","fuel:CN","gpp:listing"]
+    for key in keys_to_clear:
+        await _cache.delete(key)
+    logger.info(f"✅ Cleared {len(keys_to_clear)} fuel cache entries")
 
 
 async def _clear_stale_team_caches():

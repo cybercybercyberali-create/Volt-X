@@ -214,7 +214,10 @@ async def _show_fuel(send_to: Message, country: str, lang: str) -> None:
                 source=source_label,
                 ago=ago,
             )
-            await send_to.answer(card_text, parse_mode="Markdown")
+            try:
+                await send_to.answer(card_text, parse_mode="Markdown")
+            except Exception:
+                await send_to.answer(card_text)
             return
 
         # ── Other countries: simple display ──────────────────────────────────

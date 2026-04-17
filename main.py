@@ -87,6 +87,7 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(_self_ping())
         logger.info("✅ Self-ping task started (free plan)")
 
+    asyncio.create_task(_clear_fuel_caches())
     asyncio.create_task(_fuel_refresh_loop())
     logger.info("✅ Fuel auto-refresh task started (24 h interval)")
 
@@ -169,6 +170,18 @@ async def health_check():
 @app.get("/")
 async def root():
     return {"message": "Omega Bot is running!", "plan": RENDER_PLAN}
+
+
+async def _clear_fuel_caches():
+    """Clear all cached fuel data at startup so stale/bad results are discarded."""
+    from services.cache_service import cache as _cache
+    from api_clients.omega_fuel import ARAB_FUEL_SOURCES
+    await asyncio.sleep(3)
+    keys_to_clear = [f"fuel:{code}" for code in ARAB_FUEL_SOURCES]
+    keys_to_clear += ["fuel:US","fuel:DE","fuel:FR","fuel:GB","fuel:JP","fuel:IN","fuel:BR","fuel:RU","fuel:CN","gpp:listing"]
+    for key in keys_to_clear:
+        await _cache.delete(key)
+    logger.info(f"✅ Cleared {len(keys_to_clear)} fuel cache entries")
 
 
 async def _clear_stale_team_caches():
