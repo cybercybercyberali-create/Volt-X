@@ -5118,6 +5118,115 @@ class OmegaFootball:
             logger.warning(f"api-football error: {exc}")
             return None
 
+    def _normalize_tsdb(self, ev: dict, league_code: str) -> dict | None:
+        """Normalize a TheSportsDB event into the standard fixture dict."""
+        try:
+            home = ev.get("strHomeTeam", "") or ""
+            away = ev.get("strAwayTeam", "") or ""
+            if not home or not away:
+                return None
+            raw_status = (ev.get("strStatus") or ev.get("strProgress") or "").strip()
+            _ST = {
+                "Match Finished": "FT", "FT": "FT",
+                "Not Started": "NS",    "NS": "NS",
+                "In Progress": "1H",
+                "Half Time": "HT",
+                "Postponed": "PST",
+                "Cancelled": "CANC",
+            }
+            status = _ST.get(raw_status, "NS" if not raw_status else raw_status[:3])
+            h_score: int | None = None
+            a_score: int | None = None
+            if status == "FT":
+                try:
+                    h_score = int(ev.get("intHomeScore") or 0)
+                    a_score = int(ev.get("intAwayScore") or 0)
+                except (TypeError, ValueError):
+                    pass
+            # Build UTC timestamp from dateEvent + strTime
+            date_utc = ""
+            date_ev  = ev.get("strTimestamp") or ev.get("dateEvent", "")
+            time_ev  = ev.get("strTime", "")
+            if date_ev and "T" in date_ev:
+                date_utc = date_ev if date_ev.endswith("Z") else date_ev + "+00:00"
+            elif date_ev and time_ev:
+                try:
+                    date_utc = f"{date_ev}T{time_ev}+00:00"
+                except Exception:
+                    date_utc = date_ev
+            info = MAJOR_LEAGUES.get(league_code.upper(), {})
+            return {
+                "fixture_id":     ev.get("idEvent"),
+                "league":         info.get("name", league_code),
+                "league_ar":      info.get("name_ar", league_code),
+                "home":           home,
+                "away":           away,
+                "home_score":     h_score,
+                "away_score":     a_score,
+                "status":         status,
+                "status_elapsed": None,
+                "venue":          ev.get("strVenue", ""),
+                "date_utc":       date_utc,
+                "source":         "thesportsdb",
+            }
+        except Exception:
+            return None
+
+    async def _fetch_thesportsdb(self, league_code: str) -> list:
+        """Fetch recent + upcoming fixtures from TheSportsDB (free, no key)."""
+        tsdb_id = _TSDB_LEAGUE_IDS.get(league_code.upper())
+        if not tsdb_id:
+            return []
+        fixtures: list[dict] = []
+        try:
+            async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+                for endpoint in ("eventsnextleague", "eventspastleague"):
+                    r = await client.get(
+                        f"{_TSDB_BASE}/{endpoint}.php",
+                        params={"id": tsdb_id},
+                        headers={"User-Agent": "Mozilla/5.0"},
+                    )
+                    if r.status_code == 200:
+                        for ev in (r.json().get("events") or []):
+                            n = self._normalize_tsdb(ev, league_code)
+                            if n:
+                                fixtures.append(n)
+        except Exception as exc:
+            logger.warning(f"TheSportsDB fixtures {league_code}: {exc}")
+        return fixtures
+
+    async def _fetch_thesportsdb_team(self, team_name: str) -> tuple[str, list, list]:
+        """Search team on TheSportsDB → (team_id, last_5, next_5)."""
+        try:
+            async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+                r = await client.get(
+                    f"{_TSDB_BASE}/searchteams.php",
+                    params={"t": team_name},
+                    headers={"User-Agent": "Mozilla/5.0"},
+                )
+                if r.status_code != 200:
+                    return "", [], []
+                teams = r.json().get("teams") or []
+                if not teams:
+                    return "", [], []
+                team_id = teams[0].get("idTeam", "")
+                if not team_id:
+                    return "", [], []
+                past_raw:     list = []
+                upcoming_raw: list = []
+                for endpoint, dest in (("eventslast", past_raw), ("eventsnext", upcoming_raw)):
+                    r2 = await client.get(
+                        f"{_TSDB_BASE}/{endpoint}.php",
+                        params={"id": team_id},
+                        headers={"User-Agent": "Mozilla/5.0"},
+                    )
+                    if r2.status_code == 200:
+                        dest += r2.json().get("events") or []
+                return team_id, past_raw, upcoming_raw
+        except Exception as exc:
+            logger.warning(f"TheSportsDB team search '{team_name}': {exc}")
+        return "", [], []
+
     async def get_fixtures(self, league_code: str, status: str = "all") -> list | dict:
         league_info = MAJOR_LEAGUES.get(league_code.upper())
         if not league_info:
@@ -5175,6 +5284,12 @@ class OmegaFootball:
         if all_fixtures:
             await cache.set(cache_key, all_fixtures, ttl=ttl)
             return all_fixtures
+
+        # Source 4 — TheSportsDB (free, no key)
+        tsdb_fixtures = await self._fetch_thesportsdb(league_code_up)
+        if tsdb_fixtures:
+            await cache.set(cache_key, tsdb_fixtures, ttl=ttl)
+            return tsdb_fixtures
 
         stale = await cache.get_stale(cache_key)
         if stale and stale.get("data"):
@@ -5420,6 +5535,28 @@ class OmegaFootball:
                             team_dict[tid] = tname
             teams = sorted([{"id": k, "name": v} for k, v in team_dict.items()], key=lambda x: x["name"])
 
+        # Source 3: TheSportsDB all-teams endpoint
+        if not teams:
+            tsdb_id = _TSDB_LEAGUE_IDS.get(league_code.upper())
+            if tsdb_id:
+                try:
+                    async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+                        r = await client.get(
+                            f"{_TSDB_BASE}/lookup_all_teams.php",
+                            params={"id": tsdb_id},
+                            headers={"User-Agent": "Mozilla/5.0"},
+                        )
+                        if r.status_code == 200:
+                            for t in (r.json().get("teams") or []):
+                                tid   = t.get("idTeam", "")
+                                tname = t.get("strTeam", "")
+                                if tid and tname:
+                                    teams.append({"id": tid, "name": tname})
+                            if teams:
+                                teams.sort(key=lambda x: x["name"])
+                except Exception as exc:
+                    logger.warning(f"TheSportsDB teams {league_code}: {exc}")
+
         # Last resort: hardcoded team list (offline / blocked scenarios)
         if not teams:
             fb = _FALLBACK_TEAMS.get(league_code.upper())
@@ -5521,6 +5658,26 @@ class OmegaFootball:
 
         past.sort(key=lambda x: x.get("date_utc", ""), reverse=True)
         upcoming.sort(key=lambda x: x.get("date_utc", ""))
+
+        # Fallback: TheSportsDB team schedule
+        if not (past or live or upcoming):
+            _, past_raw, upcoming_raw = await self._fetch_thesportsdb_team(team_name)
+            for ev in past_raw:
+                n = self._normalize_tsdb(ev, league_code)
+                if n:
+                    past.append(n)
+            for ev in upcoming_raw:
+                n = self._normalize_tsdb(ev, league_code)
+                if n:
+                    status = n.get("status", "NS")
+                    if status in ("1H", "2H", "HT", "ET", "PEN"):
+                        live.append(n)
+                    elif status == "FT":
+                        past.append(n)
+                    else:
+                        upcoming.append(n)
+            past.sort(key=lambda x: x.get("date_utc", ""), reverse=True)
+            upcoming.sort(key=lambda x: x.get("date_utc", ""))
 
         has_data = bool(past or live or upcoming)
         result = {
@@ -7419,10 +7576,26 @@ async def _show_fuel(send_to: Message, country: str, lang: str) -> None:
 
         # ── Lebanon: rich visual card ─────────────────────────────────────────
         if country == "LB":
+            from datetime import date as _date
             prices_raw = data.get("prices", {}) if not data.get("error") else {}
             rate = await _fetch_exchange_rate()
             source_label = "IPT Group"
             ago = "—"
+
+            # Published date from scraper (e.g. "17 أبريل 2026") or scraped_at timestamp
+            published_date = data.get("published_date", "")
+            scraped_at     = data.get("scraped_at", "")
+            if published_date:
+                ago = f"تحديث: {published_date}"
+            elif scraped_at:
+                try:
+                    from datetime import datetime as _dt, timezone as _tz
+                    dt = _dt.fromisoformat(scraped_at)
+                    _MONTHS_AR = ["يناير","فبراير","مارس","أبريل","مايو","يونيو",
+                                  "يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"]
+                    ago = f"تحديث: {dt.day} {_MONTHS_AR[dt.month-1]} {dt.year}"
+                except Exception:
+                    pass
 
             lbp_prices = {
                 k: v for k, v in prices_raw.items()
@@ -7451,14 +7624,21 @@ async def _show_fuel(send_to: Message, country: str, lang: str) -> None:
                         source_label = "GlobalPetrolPrices"
 
             if not _has_canonical_prices(prices_real):
+                # Static fallback — compute last Saturday (IPT updates Saturdays)
+                today = _date.today()
+                days_since_sat = (today.weekday() - 5) % 7
+                last_sat = today.replace(day=today.day - days_since_sat) if days_since_sat else today
+                _MONTHS_AR = ["يناير","فبراير","مارس","أبريل","مايو","يونيو",
+                              "يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"]
+                last_sat_ar = f"{last_sat.day} {_MONTHS_AR[last_sat.month-1]} {last_sat.year}"
                 prices_real = {
                     "بنزين 98": "2,427,000 ل.ل.",
                     "بنزين 95": "2,386,000 ل.ل.",
                     "ديزل":     "2,495,000 ل.ل.",
                     "غاز 10kg": "1,751,000 ل.ل.",
                 }
-                source_label = "IPT Group (14 أبريل 2026)"
-                ago = "تقريبي"
+                source_label = "IPT Group"
+                ago = f"آخر معروف: {last_sat_ar} ⚠️"
 
             card_text = fuel_card(
                 prices_llp=prices_real,
