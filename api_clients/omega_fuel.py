@@ -243,34 +243,31 @@ class OmegaFuel:
             "Upgrade-Insecure-Requests": "1",
         }
 
-        # Source 0a: ScraperAPI proxy — bypasses Render IP block (~1 credit/call)
+        # Source 0a: ScraperAPI proxy — bypasses Render IP block (1 credit/call)
         from config import settings as _cfg
         _skey = getattr(_cfg, "scraper_api_key", "") or ""
         if _skey:
             import httpx as _httpx
-            for _ipt_url in [
-                "https://www.iptgroup.com.lb/ipt/en/our-stations/fuel-prices",
-                "https://iptgroup.com.lb/ipt/en/our-stations/fuel-prices",
-            ]:
-                try:
-                    async with _httpx.AsyncClient(timeout=30.0) as _cl:
-                        _r = await _cl.get(
-                            "https://api.scraperapi.com/",
-                            params={"api_key": _skey, "url": _ipt_url, "render": "true"},
-                        )
-                        if _r.status_code == 200 and len(_r.text) > 500:
-                            _plain = re.sub(r'<[^>]+>', ' ', _r.text)
-                            _prices = _extract_llp_prices(_plain)
-                            if not _prices:
-                                _prices = _extract_llp_prices(_r.text)
-                            if len(_prices) >= 2:
-                                _pub = _extract_date(_plain)
-                                _prices["__scraped_at__"] = _NOW_ISO
-                                _prices["__published_date__"] = _pub
-                                logger.info(f"ScraperAPI IPT prices: {_prices}")
-                                return _prices
-                except Exception as _exc:
-                    logger.debug(f"ScraperAPI IPT error ({_ipt_url}): {_exc}")
+            try:
+                async with _httpx.AsyncClient(timeout=15.0) as _cl:
+                    _r = await _cl.get(
+                        "https://api.scraperapi.com/",
+                        params={"api_key": _skey,
+                                "url": "https://www.iptgroup.com.lb/ipt/en/our-stations/fuel-prices"},
+                    )
+                    if _r.status_code == 200 and len(_r.text) > 500:
+                        _plain = re.sub(r'<[^>]+>', ' ', _r.text)
+                        _prices = _extract_llp_prices(_plain)
+                        if not _prices:
+                            _prices = _extract_llp_prices(_r.text)
+                        if len(_prices) >= 2:
+                            _pub = _extract_date(_plain)
+                            _prices["__scraped_at__"] = _NOW_ISO
+                            _prices["__published_date__"] = _pub
+                            logger.info(f"ScraperAPI IPT prices: {_prices}")
+                            return _prices
+            except Exception as _exc:
+                logger.debug(f"ScraperAPI IPT error: {_exc}")
 
         # Source 0: IPT Group — correct URL + fallbacks
         ipt_urls = [
@@ -411,10 +408,26 @@ class OmegaFuel:
 
         result: dict[str, dict] = {}
 
+        from config import settings as _gcfg
+        _gskey = getattr(_gcfg, "scraper_api_key", "") or ""
+
         for fuel_key, url_path in [("gasoline", "gasoline_prices"), ("diesel", "diesel_prices")]:
             url = f"https://www.globalpetrolprices.com/{url_path}/"
             try:
                 html = await self._scraper.fetch_html(url, headers=_GPP_BROWSER_HEADERS)
+                if (not html or len(html) < 2000) and _gskey:
+                    import httpx as _ghx
+                    try:
+                        async with _ghx.AsyncClient(timeout=15.0) as _gc:
+                            _gr = await _gc.get(
+                                "https://api.scraperapi.com/",
+                                params={"api_key": _gskey, "url": url},
+                            )
+                            if _gr.status_code == 200 and len(_gr.text) > 2000:
+                                html = _gr.text
+                                logger.info(f"ScraperAPI GPP {fuel_key} OK")
+                    except Exception as _ge:
+                        logger.debug(f"ScraperAPI GPP error: {_ge}")
                 if not html or len(html) < 2000:
                     continue
                 soup = BeautifulSoup(html, "lxml")
