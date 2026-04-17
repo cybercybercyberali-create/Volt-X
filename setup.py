@@ -5482,43 +5482,43 @@ class OmegaFootball:
 
     async def get_league_teams(self, league_code: str) -> list[dict]:
         """Return sorted [{id, name}] for a league via standings, fallback to day-scan."""
-        sf_id = _SF_TOURNAMENT_IDS.get(league_code.upper())
-        if not sf_id:
-            return []
-        cache_key = f"sfsc:league_teams:{league_code.upper()}"
+        lc    = league_code.upper()
+        sf_id = _SF_TOURNAMENT_IDS.get(lc)     # may be None — still try other sources
+        cache_key = f"sfsc:league_teams:{lc}"
         cached = await cache.get(cache_key)
         if cached:   # falsy check rejects empty lists from broken prior fetches
             return cached
 
         teams: list[dict] = []
-        try:
-            async with httpx.AsyncClient(timeout=12, follow_redirects=True) as client:
-                # Step 1: get latest season ID
-                r = await client.get(
-                    f"https://api.sofascore.com/api/v1/unique-tournament/{sf_id}/seasons",
-                    headers=_SF_HEADERS,
-                )
-                if r.status_code == 200:
-                    seasons = r.json().get("seasons", [])
-                    if seasons:
-                        season_id = seasons[0]["id"]
-                        # Step 2: standings → full team list
-                        r2 = await client.get(
-                            f"https://api.sofascore.com/api/v1/unique-tournament/{sf_id}/season/{season_id}/standings/total",
-                            headers=_SF_HEADERS,
-                        )
-                        if r2.status_code == 200:
-                            for group in r2.json().get("standings", []):
-                                for row in group.get("rows", []):
-                                    team = row.get("team", {})
-                                    tid, tname = team.get("id"), team.get("name", "")
-                                    if tid and tname:
-                                        teams.append({"id": tid, "name": tname})
-        except Exception as exc:
-            logger.warning(f"Sofascore standings for {league_code}: {exc}")
+        if sf_id:
+            try:
+                async with httpx.AsyncClient(timeout=12, follow_redirects=True) as client:
+                    # Step 1: get latest season ID
+                    r = await client.get(
+                        f"https://api.sofascore.com/api/v1/unique-tournament/{sf_id}/seasons",
+                        headers=_SF_HEADERS,
+                    )
+                    if r.status_code == 200:
+                        seasons = r.json().get("seasons", [])
+                        if seasons:
+                            season_id = seasons[0]["id"]
+                            # Step 2: standings → full team list
+                            r2 = await client.get(
+                                f"https://api.sofascore.com/api/v1/unique-tournament/{sf_id}/season/{season_id}/standings/total",
+                                headers=_SF_HEADERS,
+                            )
+                            if r2.status_code == 200:
+                                for group in r2.json().get("standings", []):
+                                    for row in group.get("rows", []):
+                                        team = row.get("team", {})
+                                        tid, tname = team.get("id"), team.get("name", "")
+                                        if tid and tname:
+                                            teams.append({"id": tid, "name": tname})
+            except Exception as exc:
+                logger.warning(f"Sofascore standings for {lc}: {exc}")
 
         # Fallback: scan ±21 days of fixtures
-        if not teams:
+        if not teams and sf_id:
             from datetime import date, timedelta
             today = date.today()
             team_dict: dict[int, str] = {}
@@ -5537,7 +5537,7 @@ class OmegaFootball:
 
         # Source 3: TheSportsDB all-teams endpoint
         if not teams:
-            tsdb_id = _TSDB_LEAGUE_IDS.get(league_code.upper())
+            tsdb_id = _TSDB_LEAGUE_IDS.get(lc)
             if tsdb_id:
                 try:
                     async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
@@ -5555,13 +5555,14 @@ class OmegaFootball:
                             if teams:
                                 teams.sort(key=lambda x: x["name"])
                 except Exception as exc:
-                    logger.warning(f"TheSportsDB teams {league_code}: {exc}")
+                    logger.warning(f"TheSportsDB teams {lc}: {exc}")
 
         # Last resort: hardcoded team list (offline / blocked scenarios)
         if not teams:
-            fb = _FALLBACK_TEAMS.get(league_code.upper())
+            fb = _FALLBACK_TEAMS.get(lc)
             if fb:
                 teams = [{"id": i, "name": n} for i, n in enumerate(sorted(fb))]
+                logger.info(f"Using hardcoded fallback teams for {lc}: {len(teams)} teams")
 
         if teams:
             await cache.set(cache_key, teams, ttl=3600 * 24)
@@ -7624,21 +7625,21 @@ async def _show_fuel(send_to: Message, country: str, lang: str) -> None:
                         source_label = "GlobalPetrolPrices"
 
             if not _has_canonical_prices(prices_real):
-                # Static fallback — compute last Saturday (IPT updates Saturdays)
+                # Static fallback — compute last Thursday (IPT updates Thursdays)
                 today = _date.today()
-                days_since_sat = (today.weekday() - 5) % 7
-                last_sat = today.replace(day=today.day - days_since_sat) if days_since_sat else today
+                days_since_thu = (today.weekday() - 3) % 7
+                last_thu = today - __import__('datetime').timedelta(days=days_since_thu)
                 _MONTHS_AR = ["يناير","فبراير","مارس","أبريل","مايو","يونيو",
                               "يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"]
-                last_sat_ar = f"{last_sat.day} {_MONTHS_AR[last_sat.month-1]} {last_sat.year}"
+                last_thu_ar = f"{last_thu.day} {_MONTHS_AR[last_thu.month-1]} {last_thu.year}"
                 prices_real = {
-                    "بنزين 98": "2,427,000 ل.ل.",
-                    "بنزين 95": "2,386,000 ل.ل.",
-                    "ديزل":     "2,495,000 ل.ل.",
+                    "بنزين 98": "2,431,000 ل.ل.",
+                    "بنزين 95": "2,390,000 ل.ل.",
+                    "ديزل":     "2,497,000 ل.ل.",
                     "غاز 10kg": "1,751,000 ل.ل.",
                 }
                 source_label = "IPT Group"
-                ago = f"آخر معروف: {last_sat_ar} ⚠️"
+                ago = f"آخر تحديث: {last_thu_ar}"
 
             card_text = fuel_card(
                 prices_llp=prices_real,

@@ -192,19 +192,20 @@ async def _show_fuel(send_to: Message, country: str, lang: str) -> None:
             if not _has_canonical_prices(prices_real):
                 # Static fallback — compute last Saturday (IPT updates Saturdays)
                 today = _date.today()
-                days_since_sat = (today.weekday() - 5) % 7
-                last_sat = today.replace(day=today.day - days_since_sat) if days_since_sat else today
+                # IPT updates every Thursday — compute last Thursday
+                days_since_thu = (today.weekday() - 3) % 7
+                last_thu = today - __import__('datetime').timedelta(days=days_since_thu)
                 _MONTHS_AR = ["يناير","فبراير","مارس","أبريل","مايو","يونيو",
                               "يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"]
-                last_sat_ar = f"{last_sat.day} {_MONTHS_AR[last_sat.month-1]} {last_sat.year}"
+                last_thu_ar = f"{last_thu.day} {_MONTHS_AR[last_thu.month-1]} {last_thu.year}"
                 prices_real = {
-                    "بنزين 98": "2,427,000 ل.ل.",
-                    "بنزين 95": "2,386,000 ل.ل.",
-                    "ديزل":     "2,495,000 ل.ل.",
+                    "بنزين 98": "2,431,000 ل.ل.",
+                    "بنزين 95": "2,390,000 ل.ل.",
+                    "ديزل":     "2,497,000 ل.ل.",
                     "غاز 10kg": "1,751,000 ل.ل.",
                 }
                 source_label = "IPT Group"
-                ago = f"آخر معروف: {last_sat_ar} ⚠️"
+                ago = f"آخر تحديث: {last_thu_ar}"
 
             card_text = fuel_card(
                 prices_llp=prices_real,
