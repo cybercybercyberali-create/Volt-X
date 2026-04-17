@@ -23,6 +23,19 @@ MAJOR_LEAGUES = {
     "ELC": {"id": 40,  "name": "Championship",          "name_ar": "دوري الدرجة الأولى",     "country": "England"},
 }
 
+# TheSportsDB league IDs (free, no API key — https://www.thesportsdb.com/api/v1/json/3/)
+_TSDB_LEAGUE_IDS: dict[str, int] = {
+    "PL":  4328,  # Premier League
+    "PD":  4335,  # La Liga
+    "SA":  4332,  # Serie A
+    "BL1": 4331,  # Bundesliga
+    "FL1": 4334,  # Ligue 1
+    "CL":  4480,  # UEFA Champions League
+    "ELC": 4336,  # Championship
+}
+
+_TSDB_BASE = "https://www.thesportsdb.com/api/v1/json/3"
+
 # Sofascore tournament IDs (free, no API key)
 _SF_TOURNAMENT_IDS: dict[str, int] = {
     "PL":  17,
@@ -199,6 +212,115 @@ class OmegaFootball:
             logger.warning(f"api-football error: {exc}")
             return None
 
+    def _normalize_tsdb(self, ev: dict, league_code: str) -> dict | None:
+        """Normalize a TheSportsDB event into the standard fixture dict."""
+        try:
+            home = ev.get("strHomeTeam", "") or ""
+            away = ev.get("strAwayTeam", "") or ""
+            if not home or not away:
+                return None
+            raw_status = (ev.get("strStatus") or ev.get("strProgress") or "").strip()
+            _ST = {
+                "Match Finished": "FT", "FT": "FT",
+                "Not Started": "NS",    "NS": "NS",
+                "In Progress": "1H",
+                "Half Time": "HT",
+                "Postponed": "PST",
+                "Cancelled": "CANC",
+            }
+            status = _ST.get(raw_status, "NS" if not raw_status else raw_status[:3])
+            h_score: int | None = None
+            a_score: int | None = None
+            if status == "FT":
+                try:
+                    h_score = int(ev.get("intHomeScore") or 0)
+                    a_score = int(ev.get("intAwayScore") or 0)
+                except (TypeError, ValueError):
+                    pass
+            # Build UTC timestamp from dateEvent + strTime
+            date_utc = ""
+            date_ev  = ev.get("strTimestamp") or ev.get("dateEvent", "")
+            time_ev  = ev.get("strTime", "")
+            if date_ev and "T" in date_ev:
+                date_utc = date_ev if date_ev.endswith("Z") else date_ev + "+00:00"
+            elif date_ev and time_ev:
+                try:
+                    date_utc = f"{date_ev}T{time_ev}+00:00"
+                except Exception:
+                    date_utc = date_ev
+            info = MAJOR_LEAGUES.get(league_code.upper(), {})
+            return {
+                "fixture_id":     ev.get("idEvent"),
+                "league":         info.get("name", league_code),
+                "league_ar":      info.get("name_ar", league_code),
+                "home":           home,
+                "away":           away,
+                "home_score":     h_score,
+                "away_score":     a_score,
+                "status":         status,
+                "status_elapsed": None,
+                "venue":          ev.get("strVenue", ""),
+                "date_utc":       date_utc,
+                "source":         "thesportsdb",
+            }
+        except Exception:
+            return None
+
+    async def _fetch_thesportsdb(self, league_code: str) -> list:
+        """Fetch recent + upcoming fixtures from TheSportsDB (free, no key)."""
+        tsdb_id = _TSDB_LEAGUE_IDS.get(league_code.upper())
+        if not tsdb_id:
+            return []
+        fixtures: list[dict] = []
+        try:
+            async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+                for endpoint in ("eventsnextleague", "eventspastleague"):
+                    r = await client.get(
+                        f"{_TSDB_BASE}/{endpoint}.php",
+                        params={"id": tsdb_id},
+                        headers={"User-Agent": "Mozilla/5.0"},
+                    )
+                    if r.status_code == 200:
+                        for ev in (r.json().get("events") or []):
+                            n = self._normalize_tsdb(ev, league_code)
+                            if n:
+                                fixtures.append(n)
+        except Exception as exc:
+            logger.warning(f"TheSportsDB fixtures {league_code}: {exc}")
+        return fixtures
+
+    async def _fetch_thesportsdb_team(self, team_name: str) -> tuple[str, list, list]:
+        """Search team on TheSportsDB → (team_id, last_5, next_5)."""
+        try:
+            async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+                r = await client.get(
+                    f"{_TSDB_BASE}/searchteams.php",
+                    params={"t": team_name},
+                    headers={"User-Agent": "Mozilla/5.0"},
+                )
+                if r.status_code != 200:
+                    return "", [], []
+                teams = r.json().get("teams") or []
+                if not teams:
+                    return "", [], []
+                team_id = teams[0].get("idTeam", "")
+                if not team_id:
+                    return "", [], []
+                past_raw:     list = []
+                upcoming_raw: list = []
+                for endpoint, dest in (("eventslast", past_raw), ("eventsnext", upcoming_raw)):
+                    r2 = await client.get(
+                        f"{_TSDB_BASE}/{endpoint}.php",
+                        params={"id": team_id},
+                        headers={"User-Agent": "Mozilla/5.0"},
+                    )
+                    if r2.status_code == 200:
+                        dest += r2.json().get("events") or []
+                return team_id, past_raw, upcoming_raw
+        except Exception as exc:
+            logger.warning(f"TheSportsDB team search '{team_name}': {exc}")
+        return "", [], []
+
     async def get_fixtures(self, league_code: str, status: str = "all") -> list | dict:
         league_info = MAJOR_LEAGUES.get(league_code.upper())
         if not league_info:
@@ -256,6 +378,12 @@ class OmegaFootball:
         if all_fixtures:
             await cache.set(cache_key, all_fixtures, ttl=ttl)
             return all_fixtures
+
+        # Source 4 — TheSportsDB (free, no key)
+        tsdb_fixtures = await self._fetch_thesportsdb(league_code_up)
+        if tsdb_fixtures:
+            await cache.set(cache_key, tsdb_fixtures, ttl=ttl)
+            return tsdb_fixtures
 
         stale = await cache.get_stale(cache_key)
         if stale and stale.get("data"):
@@ -501,6 +629,28 @@ class OmegaFootball:
                             team_dict[tid] = tname
             teams = sorted([{"id": k, "name": v} for k, v in team_dict.items()], key=lambda x: x["name"])
 
+        # Source 3: TheSportsDB all-teams endpoint
+        if not teams:
+            tsdb_id = _TSDB_LEAGUE_IDS.get(league_code.upper())
+            if tsdb_id:
+                try:
+                    async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+                        r = await client.get(
+                            f"{_TSDB_BASE}/lookup_all_teams.php",
+                            params={"id": tsdb_id},
+                            headers={"User-Agent": "Mozilla/5.0"},
+                        )
+                        if r.status_code == 200:
+                            for t in (r.json().get("teams") or []):
+                                tid   = t.get("idTeam", "")
+                                tname = t.get("strTeam", "")
+                                if tid and tname:
+                                    teams.append({"id": tid, "name": tname})
+                            if teams:
+                                teams.sort(key=lambda x: x["name"])
+                except Exception as exc:
+                    logger.warning(f"TheSportsDB teams {league_code}: {exc}")
+
         # Last resort: hardcoded team list (offline / blocked scenarios)
         if not teams:
             fb = _FALLBACK_TEAMS.get(league_code.upper())
@@ -603,6 +753,26 @@ class OmegaFootball:
 
         past.sort(key=lambda x: x.get("date_utc", ""), reverse=True)
         upcoming.sort(key=lambda x: x.get("date_utc", ""))
+
+        # Fallback: TheSportsDB team schedule
+        if not (past or live or upcoming):
+            _, past_raw, upcoming_raw = await self._fetch_thesportsdb_team(team_name)
+            for ev in past_raw:
+                n = self._normalize_tsdb(ev, league_code)
+                if n:
+                    past.append(n)
+            for ev in upcoming_raw:
+                n = self._normalize_tsdb(ev, league_code)
+                if n:
+                    status = n.get("status", "NS")
+                    if status in ("1H", "2H", "HT", "ET", "PEN"):
+                        live.append(n)
+                    elif status == "FT":
+                        past.append(n)
+                    else:
+                        upcoming.append(n)
+            past.sort(key=lambda x: x.get("date_utc", ""), reverse=True)
+            upcoming.sort(key=lambda x: x.get("date_utc", ""))
 
         has_data = bool(past or live or upcoming)
         result = {

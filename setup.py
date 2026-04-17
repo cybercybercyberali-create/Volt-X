@@ -4198,6 +4198,7 @@ omega_currency = OmegaCurrency()
 
 FILES["api_clients/omega_fuel.py"] = r'''
 import logging
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from api_clients.base_client import BaseAPIClient
@@ -4291,14 +4292,28 @@ class OmegaFuel:
         self._scraper = BaseAPIClient("fuel_scraper")
         self._global = BaseAPIClient("globalpetrolprices", "https://www.globalpetrolprices.com")
 
-    async def get_prices(self, country_code: str) -> dict[str, Any]:
-        """Get fuel prices for a country."""
-        cache_key = f"fuel:{country_code}"
-        cached = await cache.get(cache_key)
-        if cached:
-            return cached
-
+    async def get_prices(self, country_code: str, force: bool = False) -> dict[str, Any]:
+        """Get fuel prices for a country. force=True bypasses cache."""
         country_code = country_code.upper()
+        cache_key = f"fuel:{country_code}"
+
+        if not force:
+            cached = await cache.get(cache_key)
+            if cached:
+                # For Lebanon: force-refresh if cached data is older than 48 hours
+                if country_code == "LB":
+                    scraped_at = cached.get("scraped_at", "")
+                    if scraped_at:
+                        try:
+                            age_h = (datetime.now(timezone.utc) -
+                                     datetime.fromisoformat(scraped_at)).total_seconds() / 3600
+                            if age_h > 48:
+                                logger.info("LB fuel cache older than 48 h — forcing refresh")
+                                force = True
+                        except Exception:
+                            pass
+                if not force:
+                    return cached
 
         if country_code in ARAB_FUEL_SOURCES:
             result = await self._get_arab_country_prices(country_code)
@@ -4327,6 +4342,8 @@ class OmegaFuel:
         if country_code == "LB":
             prices = await self._scrape_lebanon_fuel()
             if prices:
+                result["scraped_at"]      = prices.pop("__scraped_at__", "")
+                result["published_date"]  = prices.pop("__published_date__", "")
                 result["prices"] = prices
                 return result
 
@@ -4345,9 +4362,36 @@ class OmegaFuel:
         return result
 
     async def _scrape_lebanon_fuel(self) -> Optional[dict]:
-        """Scrape Lebanon fuel prices from multiple sources."""
+        """Scrape Lebanon fuel prices — returns dict with prices + scraped_at + published_date."""
         import re
         from bs4 import BeautifulSoup
+
+        _NOW_ISO = datetime.now(timezone.utc).isoformat()
+
+        # Helper: extract a date string from IPT page (looks for patterns like "17 April 2026")
+        _AR_MONTHS = {"january":"يناير","february":"فبراير","march":"مارس","april":"أبريل",
+                      "may":"مايو","june":"يونيو","july":"يوليو","august":"أغسطس",
+                      "september":"سبتمبر","october":"أكتوبر","november":"نوفمبر","december":"ديسمبر"}
+        def _extract_date(text: str) -> str:
+            m = re.search(
+                r'(\d{1,2})\s+(january|february|march|april|may|june|july|august|'
+                r'september|october|november|december)\s+(\d{4})',
+                text, re.IGNORECASE)
+            if m:
+                day, month_en, year = m.group(1), m.group(2).lower(), m.group(3)
+                month_ar = _AR_MONTHS.get(month_en, month_en)
+                return f"{day} {month_ar} {year}"
+            # ISO date 2026-04-17 or 17/04/2026
+            m2 = re.search(r'(\d{4})-(\d{2})-(\d{2})', text)
+            if m2:
+                from datetime import date as _date
+                try:
+                    d = _date(int(m2.group(1)), int(m2.group(2)), int(m2.group(3)))
+                    month_ar = _AR_MONTHS.get(d.strftime("%B").lower(), d.strftime("%B"))
+                    return f"{d.day} {month_ar} {d.year}"
+                except Exception:
+                    pass
+            return ""
 
         # Helper: extract LBP price numbers >100,000 from HTML text
         def _extract_llp_prices(html_text: str) -> dict:
@@ -4440,10 +4484,16 @@ class OmegaFuel:
                 prices = _extract_llp_prices(plain)
                 if len(prices) >= 2:
                     logger.info(f"IPT fuel prices from {url}: {prices}")
+                    pub = _extract_date(plain)
+                    prices["__scraped_at__"] = _NOW_ISO
+                    prices["__published_date__"] = pub
                     return prices
                 # Also try raw HTML in case values are in attributes
                 prices = _extract_llp_prices(html)
                 if len(prices) >= 2:
+                    pub = _extract_date(re.sub(r'<[^>]+>', ' ', html))
+                    prices["__scraped_at__"] = _NOW_ISO
+                    prices["__published_date__"] = pub
                     return prices
             except Exception as exc:
                 logger.debug(f"iptgroup {url} error: {exc}")
@@ -4457,6 +4507,9 @@ class OmegaFuel:
                     plain = soup.get_text(" ")
                     prices = _extract_llp_prices(plain)
                     if len(prices) >= 2:
+                        pub = _extract_date(plain)
+                        prices["__scraped_at__"] = _NOW_ISO
+                        prices["__published_date__"] = pub
                         return prices
                     # Try table parsing
                     prices_tbl = {}
@@ -4474,6 +4527,8 @@ class OmegaFuel:
                                         prices_tbl[name] = f"{val:,} ل.ل."
                                         break
                     if len(prices_tbl) >= 2:
+                        prices_tbl["__scraped_at__"] = _NOW_ISO
+                        prices_tbl["__published_date__"] = _extract_date(plain)
                         return prices_tbl
             except Exception as exc:
                 logger.debug(f"mol.gov.lb error ({url}): {exc}")
@@ -4874,6 +4929,18 @@ MAJOR_LEAGUES = {
     "SPL": {"id": 307, "name": "Saudi Pro League",      "name_ar": "دوري روشن",              "country": "Saudi Arabia"},
     "ELC": {"id": 40,  "name": "Championship",          "name_ar": "دوري الدرجة الأولى",     "country": "England"},
 }
+
+_TSDB_LEAGUE_IDS: dict[str, int] = {
+    "PL":  4328,  # Premier League
+    "PD":  4335,  # La Liga
+    "SA":  4332,  # Serie A
+    "BL1": 4331,  # Bundesliga
+    "FL1": 4334,  # Ligue 1
+    "CL":  4480,  # UEFA Champions League
+    "ELC": 4336,  # Championship
+}
+
+_TSDB_BASE = "https://www.thesportsdb.com/api/v1/json/3"
 
 # Sofascore tournament IDs (free, no API key)
 _SF_TOURNAMENT_IDS: dict[str, int] = {

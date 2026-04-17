@@ -142,10 +142,26 @@ async def _show_fuel(send_to: Message, country: str, lang: str) -> None:
 
         # ── Lebanon: rich visual card ─────────────────────────────────────────
         if country == "LB":
+            from datetime import date as _date
             prices_raw = data.get("prices", {}) if not data.get("error") else {}
             rate = await _fetch_exchange_rate()
             source_label = "IPT Group"
             ago = "—"
+
+            # Published date from scraper (e.g. "17 أبريل 2026") or scraped_at timestamp
+            published_date = data.get("published_date", "")
+            scraped_at     = data.get("scraped_at", "")
+            if published_date:
+                ago = f"تحديث: {published_date}"
+            elif scraped_at:
+                try:
+                    from datetime import datetime as _dt, timezone as _tz
+                    dt = _dt.fromisoformat(scraped_at)
+                    _MONTHS_AR = ["يناير","فبراير","مارس","أبريل","مايو","يونيو",
+                                  "يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"]
+                    ago = f"تحديث: {dt.day} {_MONTHS_AR[dt.month-1]} {dt.year}"
+                except Exception:
+                    pass
 
             lbp_prices = {
                 k: v for k, v in prices_raw.items()
@@ -174,14 +190,21 @@ async def _show_fuel(send_to: Message, country: str, lang: str) -> None:
                         source_label = "GlobalPetrolPrices"
 
             if not _has_canonical_prices(prices_real):
+                # Static fallback — compute last Saturday (IPT updates Saturdays)
+                today = _date.today()
+                days_since_sat = (today.weekday() - 5) % 7
+                last_sat = today.replace(day=today.day - days_since_sat) if days_since_sat else today
+                _MONTHS_AR = ["يناير","فبراير","مارس","أبريل","مايو","يونيو",
+                              "يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"]
+                last_sat_ar = f"{last_sat.day} {_MONTHS_AR[last_sat.month-1]} {last_sat.year}"
                 prices_real = {
                     "بنزين 98": "2,427,000 ل.ل.",
                     "بنزين 95": "2,386,000 ل.ل.",
                     "ديزل":     "2,495,000 ل.ل.",
                     "غاز 10kg": "1,751,000 ل.ل.",
                 }
-                source_label = "IPT Group (14 أبريل 2026)"
-                ago = "تقريبي"
+                source_label = "IPT Group"
+                ago = f"آخر معروف: {last_sat_ar} ⚠️"
 
             card_text = fuel_card(
                 prices_llp=prices_real,
