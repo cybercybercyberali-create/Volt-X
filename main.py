@@ -88,11 +88,9 @@ async def lifespan(app: FastAPI):
         logger.info("✅ Self-ping task started (free plan)")
 
     asyncio.create_task(_clear_fuel_caches())
+    asyncio.create_task(_clear_stale_team_caches())
     asyncio.create_task(_fuel_refresh_loop())
     logger.info("✅ Fuel auto-refresh task started (24 h interval)")
-
-    # Clear stale team-list caches so new sources (TheSportsDB + fallback) are tried
-    asyncio.create_task(_clear_stale_team_caches())
 
     from workers.notification_worker import notification_worker
     await notification_worker.start(bot)
@@ -185,16 +183,18 @@ async def _clear_fuel_caches():
 
 
 async def _clear_stale_team_caches():
-    """Delete cached empty team lists so TheSportsDB / fallback are used on next request."""
+    """One-time flush of all league team caches on startup — remove after first deploy."""
     from services.cache_service import cache as _cache
-    from api_clients.omega_football import MAJOR_LEAGUES
     await asyncio.sleep(5)
-    for code in MAJOR_LEAGUES:
-        key = f"sfsc:league_teams:{code.upper()}"
-        existing = await _cache.get(key)
-        if existing is not None and not existing:   # empty list cached
-            await _cache.delete(key)
-            logger.info(f"Cleared empty team cache for {code}")
+    keys = [
+        "sfsc:league_teams:PD", "sfsc:league_teams:PL",
+        "sfsc:league_teams:SA", "sfsc:league_teams:BL1",
+        "sfsc:league_teams:FL1", "sfsc:league_teams:CL",
+        "sfsc:league_teams:SPL", "sfsc:league_teams:ELC",
+    ]
+    for k in keys:
+        await _cache.delete(k)
+    logger.info(f"✅ Flushed {len(keys)} league team cache keys")
 
 
 async def _fuel_refresh_loop():
