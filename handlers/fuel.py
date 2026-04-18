@@ -139,27 +139,34 @@ async def _show_fuel(send_to: Message, country: str, lang: str) -> None:
     await send_to.answer(t("fetching", lang))
     try:
         data = await omega_fuel.get_prices(country)
+    except Exception as exc:
+        logger.error(f"get_prices failed for {country}: {exc}", exc_info=True)
+        data = {"error": True, "prices": {}}
 
-        # ── Lebanon: rich visual card ─────────────────────────────────────────
-        if country == "LB":
+    # ── Lebanon: rich visual card ─────────────────────────────────────────
+    if country == "LB":
+        try:
             from datetime import date as _date
             prices_raw = data.get("prices", {}) if not data.get("error") else {}
-            rate = await _fetch_exchange_rate()
+            rate = 89500.0
+            try:
+                rate = await _fetch_exchange_rate()
+            except Exception:
+                pass
             source_label = "IPT Group"
             ago = "—"
 
-            # Published date from scraper (e.g. "17 أبريل 2026") or scraped_at timestamp
             published_date = data.get("published_date", "")
             scraped_at     = data.get("scraped_at", "")
             if published_date:
                 ago = f"تحديث: {published_date}"
             elif scraped_at:
                 try:
-                    from datetime import datetime as _dt, timezone as _tz
+                    from datetime import datetime as _dt
                     dt = _dt.fromisoformat(scraped_at)
-                    _MONTHS_AR = ["يناير","فبراير","مارس","أبريل","مايو","يونيو",
-                                  "يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"]
-                    ago = f"تحديث: {dt.day} {_MONTHS_AR[dt.month-1]} {dt.year}"
+                    _M = ["يناير","فبراير","مارس","أبريل","مايو","يونيو",
+                          "يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"]
+                    ago = f"تحديث: {dt.day} {_M[dt.month-1]} {dt.year}"
                 except Exception:
                     pass
 
@@ -190,14 +197,13 @@ async def _show_fuel(send_to: Message, country: str, lang: str) -> None:
                         source_label = "GlobalPetrolPrices"
 
             if not _has_canonical_prices(prices_real):
-                # Static fallback — compute last Saturday (IPT updates Saturdays)
-                today = _date.today()
-                # IPT updates every Thursday — compute last Thursday
+                from datetime import date as _d, timedelta as _td
+                today = _d.today()
                 days_since_thu = (today.weekday() - 3) % 7
-                last_thu = today - __import__('datetime').timedelta(days=days_since_thu)
-                _MONTHS_AR = ["يناير","فبراير","مارس","أبريل","مايو","يونيو",
-                              "يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"]
-                last_thu_ar = f"{last_thu.day} {_MONTHS_AR[last_thu.month-1]} {last_thu.year}"
+                last_thu = today - _td(days=days_since_thu)
+                _M = ["يناير","فبراير","مارس","أبريل","مايو","يونيو",
+                      "يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"]
+                last_thu_ar = f"{last_thu.day} {_M[last_thu.month-1]} {last_thu.year}"
                 prices_real = {
                     "بنزين 98": "2,431,000 ل.ل.",
                     "بنزين 95": "2,390,000 ل.ل.",
@@ -218,9 +224,19 @@ async def _show_fuel(send_to: Message, country: str, lang: str) -> None:
                 await send_to.answer(card_text, parse_mode="Markdown")
             except Exception:
                 await send_to.answer(card_text)
-            return
+        except Exception as exc:
+            logger.error(f"LB fuel display error: {exc}", exc_info=True)
+            await send_to.answer(
+                "⛽ أسعار لبنان — آخر معروف:\n"
+                "بنزين 98: 2,431,000 ل.ل.\n"
+                "بنزين 95: 2,390,000 ل.ل.\n"
+                "ديزل: 2,497,000 ل.ل.\n"
+                "غاز 10kg: 1,751,000 ل.ل."
+            )
+        return
 
-        # ── Other countries: simple display ──────────────────────────────────
+    # ── Other countries: simple display ──────────────────────────────────
+    try:
         if data.get("error"):
             await send_to.answer(t("error", lang))
             return
@@ -234,16 +250,18 @@ async def _show_fuel(send_to: Message, country: str, lang: str) -> None:
                     text += f"  🔹 {fuel_type}: {price}\n"
         if data.get("stale"):
             text += (
-                "\n⚠️ _آخر بيانات معروفة — أبريل 2026_"
+                "\n⚠️ آخر بيانات معروفة — أبريل 2026"
                 if lang == "ar"
-                else "\n⚠️ _Last known data — April 2026_"
+                else "\n⚠️ Last known data — April 2026"
             )
         if data.get("note"):
             text += f"\n{t('label_note', lang)}: {data['note']}"
-        await send_to.answer(text, parse_mode="Markdown")
-
+        try:
+            await send_to.answer(text, parse_mode="Markdown")
+        except Exception:
+            await send_to.answer(text)
     except Exception as exc:
-        logger.error(f"Fuel error for {country}: {exc}", exc_info=True)
+        logger.error(f"Fuel display error for {country}: {exc}", exc_info=True)
         await send_to.answer(t("error", lang))
 
 

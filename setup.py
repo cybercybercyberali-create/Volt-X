@@ -7600,27 +7600,34 @@ async def _show_fuel(send_to: Message, country: str, lang: str) -> None:
     await send_to.answer(t("fetching", lang))
     try:
         data = await omega_fuel.get_prices(country)
+    except Exception as exc:
+        logger.error(f"get_prices failed for {country}: {exc}", exc_info=True)
+        data = {"error": True, "prices": {}}
 
-        # ── Lebanon: rich visual card ─────────────────────────────────────────
-        if country == "LB":
+    # ── Lebanon: rich visual card ─────────────────────────────────────────
+    if country == "LB":
+        try:
             from datetime import date as _date
             prices_raw = data.get("prices", {}) if not data.get("error") else {}
-            rate = await _fetch_exchange_rate()
+            rate = 89500.0
+            try:
+                rate = await _fetch_exchange_rate()
+            except Exception:
+                pass
             source_label = "IPT Group"
             ago = "—"
 
-            # Published date from scraper (e.g. "17 أبريل 2026") or scraped_at timestamp
             published_date = data.get("published_date", "")
             scraped_at     = data.get("scraped_at", "")
             if published_date:
                 ago = f"تحديث: {published_date}"
             elif scraped_at:
                 try:
-                    from datetime import datetime as _dt, timezone as _tz
+                    from datetime import datetime as _dt
                     dt = _dt.fromisoformat(scraped_at)
-                    _MONTHS_AR = ["يناير","فبراير","مارس","أبريل","مايو","يونيو",
-                                  "يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"]
-                    ago = f"تحديث: {dt.day} {_MONTHS_AR[dt.month-1]} {dt.year}"
+                    _M = ["يناير","فبراير","مارس","أبريل","مايو","يونيو",
+                          "يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"]
+                    ago = f"تحديث: {dt.day} {_M[dt.month-1]} {dt.year}"
                 except Exception:
                     pass
 
@@ -7651,13 +7658,13 @@ async def _show_fuel(send_to: Message, country: str, lang: str) -> None:
                         source_label = "GlobalPetrolPrices"
 
             if not _has_canonical_prices(prices_real):
-                # Static fallback — compute last Thursday (IPT updates Thursdays)
-                today = _date.today()
+                from datetime import date as _d, timedelta as _td
+                today = _d.today()
                 days_since_thu = (today.weekday() - 3) % 7
-                last_thu = today - __import__('datetime').timedelta(days=days_since_thu)
-                _MONTHS_AR = ["يناير","فبراير","مارس","أبريل","مايو","يونيو",
-                              "يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"]
-                last_thu_ar = f"{last_thu.day} {_MONTHS_AR[last_thu.month-1]} {last_thu.year}"
+                last_thu = today - _td(days=days_since_thu)
+                _M = ["يناير","فبراير","مارس","أبريل","مايو","يونيو",
+                      "يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"]
+                last_thu_ar = f"{last_thu.day} {_M[last_thu.month-1]} {last_thu.year}"
                 prices_real = {
                     "بنزين 98": "2,431,000 ل.ل.",
                     "بنزين 95": "2,390,000 ل.ل.",
@@ -7678,9 +7685,19 @@ async def _show_fuel(send_to: Message, country: str, lang: str) -> None:
                 await send_to.answer(card_text, parse_mode="Markdown")
             except Exception:
                 await send_to.answer(card_text)
-            return
+        except Exception as exc:
+            logger.error(f"LB fuel display error: {exc}", exc_info=True)
+            await send_to.answer(
+                "⛽ أسعار لبنان — آخر معروف:\n"
+                "بنزين 98: 2,431,000 ل.ل.\n"
+                "بنزين 95: 2,390,000 ل.ل.\n"
+                "ديزل: 2,497,000 ل.ل.\n"
+                "غاز 10kg: 1,751,000 ل.ل."
+            )
+        return
 
-        # ── Other countries: simple display ──────────────────────────────────
+    # ── Other countries: simple display ──────────────────────────────────
+    try:
         if data.get("error"):
             await send_to.answer(t("error", lang))
             return
@@ -7694,16 +7711,18 @@ async def _show_fuel(send_to: Message, country: str, lang: str) -> None:
                     text += f"  🔹 {fuel_type}: {price}\n"
         if data.get("stale"):
             text += (
-                "\n⚠️ _آخر بيانات معروفة — أبريل 2026_"
+                "\n⚠️ آخر بيانات معروفة — أبريل 2026"
                 if lang == "ar"
-                else "\n⚠️ _Last known data — April 2026_"
+                else "\n⚠️ Last known data — April 2026"
             )
         if data.get("note"):
             text += f"\n{t('label_note', lang)}: {data['note']}"
-        await send_to.answer(text, parse_mode="Markdown")
-
+        try:
+            await send_to.answer(text, parse_mode="Markdown")
+        except Exception:
+            await send_to.answer(text)
     except Exception as exc:
-        logger.error(f"Fuel error for {country}: {exc}", exc_info=True)
+        logger.error(f"Fuel display error for {country}: {exc}", exc_info=True)
         await send_to.answer(t("error", lang))
 
 
@@ -7952,7 +7971,7 @@ def _fmt_events(events: list, lang: str = "ar") -> str:
 
         line = f"  {icon} {time_str} *{player}*"
         if team:
-            line += f"  _{team}_"
+            line += f"  ({team})"
         lines.append(line)
 
     header = "📋 *أحداث المباراة*" if lang == "ar" else "📋 *Match Events*"
@@ -8081,30 +8100,48 @@ def _nearest(fixtures: list) -> list:
 
 async def _send_fixtures(target, league_code: str, lang: str) -> None:
     send = target.answer if isinstance(target, Message) else target.message.answer
-    data = await omega_football.get_fixtures(league_code)
+    try:
+        data = await omega_football.get_fixtures(league_code)
+    except Exception as exc:
+        logger.error(f"get_fixtures error {league_code}: {exc}", exc_info=True)
+        data = {"error": True}
     if isinstance(data, dict) and data.get("error"):
-        await send(t("error", lang))
+        no_data = "لا تتوفر بيانات حالياً — اضغط تحديث" if lang == "ar" else "No data available right now — press Refresh"
+        try:
+            await send(no_data, reply_markup=_matchday_kb(league_code.upper(), lang))
+        except Exception:
+            await send(no_data)
         return
     selection = _today(data) or _nearest(data)
     if not selection:
-        await send(t("fb_no_live", lang))
+        try:
+            await send(t("fb_no_live", lang), reply_markup=_matchday_kb(league_code.upper(), lang))
+        except Exception:
+            await send(t("fb_no_live", lang))
         return
     league_name = _league_name(league_code, lang)
     card = _matchday_card(selection[:12], league_name, lang)
     kb   = _matchday_kb(league_code.upper(), lang)
-    await send(card, parse_mode="Markdown", reply_markup=kb)
+    try:
+        await send(card, parse_mode="Markdown", reply_markup=kb)
+    except Exception:
+        await send(card, reply_markup=kb)
 
 
 async def _send_live(target, lang: str) -> None:
     send = target.answer if isinstance(target, Message) else target.message.answer
-    data = await omega_football.get_live()
+    try:
+        data = await omega_football.get_live()
+    except Exception as exc:
+        logger.error(f"get_live error: {exc}", exc_info=True)
+        await send(t("fb_no_live", lang))
+        return
     if isinstance(data, dict) and data.get("error"):
         await send(t("fb_no_live", lang))
         return
     if not data:
         await send(t("fb_no_live", lang))
         return
-    # Group by league for a clean overview — pick the right-language name
     by_league: dict[str, list] = {}
     for f in data[:20]:
         if lang == "ar":
@@ -8114,7 +8151,10 @@ async def _send_live(target, lang: str) -> None:
         by_league.setdefault(key, []).append(f)
     for league_name, matches in by_league.items():
         card = _matchday_card(matches, league_name, lang)
-        await send(card, parse_mode="Markdown")
+        try:
+            await send(card, parse_mode="Markdown")
+        except Exception:
+            await send(card)
 
 
 # ── command handler ────────────────────────────────────────────────────────────
@@ -8227,7 +8267,12 @@ async def handle_fb_team_cb(callback: CallbackQuery, lang: str = "en") -> None:
         return
     team_name = teams[team_idx]["name"]
 
-    sched = await omega_football.get_team_schedule_by_name(team_name, league_code)
+    try:
+        sched = await omega_football.get_team_schedule_by_name(team_name, league_code)
+    except Exception as exc:
+        logger.error(f"get_team_schedule_by_name error: {exc}", exc_info=True)
+        await callback.message.answer(t("error", lang))
+        return
     card  = _team_schedule_card(sched, team_name, league_name, lang)
 
     back_lbl   = "🔙 الفرق"  if lang == "ar" else "🔙 Teams"
@@ -8236,7 +8281,10 @@ async def handle_fb_team_cb(callback: CallbackQuery, lang: str = "en") -> None:
         InlineKeyboardButton(text=back_lbl,   callback_data=f"fb_teams:{league_code.lower()}"),
         InlineKeyboardButton(text=reload_lbl, callback_data=f"fb_t:{team_idx}:{league_code}"),
     ]])
-    await callback.message.answer(card, parse_mode="Markdown", reply_markup=back_kb)
+    try:
+        await callback.message.answer(card, parse_mode="Markdown", reply_markup=back_kb)
+    except Exception:
+        await callback.message.answer(card, reply_markup=back_kb)
 
 
 # ── callback: match events ─────────────────────────────────────────────────────
@@ -8248,12 +8296,20 @@ async def handle_fb_events_cb(callback: CallbackQuery, lang: str = "en") -> None
         fixture_id = int(callback.data.split(":")[1])
     except (IndexError, ValueError):
         return
-    events = await omega_football.get_events(fixture_id)
+    try:
+        events = await omega_football.get_events(fixture_id)
+    except Exception as exc:
+        logger.error(f"get_events error: {exc}", exc_info=True)
+        await callback.message.answer(t("error", lang))
+        return
     if isinstance(events, dict) and events.get("error"):
         await callback.message.answer(t("error", lang))
         return
     text = _fmt_events(events if isinstance(events, list) else [], lang)
-    await callback.message.answer(text, parse_mode="Markdown")
+    try:
+        await callback.message.answer(text, parse_mode="Markdown")
+    except Exception:
+        await callback.message.answer(text)
 
 
 def register_football_handlers(dp) -> None:

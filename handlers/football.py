@@ -226,7 +226,7 @@ def _fmt_events(events: list, lang: str = "ar") -> str:
 
         line = f"  {icon} {time_str} *{player}*"
         if team:
-            line += f"  _{team}_"
+            line += f"  ({team})"
         lines.append(line)
 
     header = "📋 *أحداث المباراة*" if lang == "ar" else "📋 *Match Events*"
@@ -256,30 +256,48 @@ def _nearest(fixtures: list) -> list:
 
 async def _send_fixtures(target, league_code: str, lang: str) -> None:
     send = target.answer if isinstance(target, Message) else target.message.answer
-    data = await omega_football.get_fixtures(league_code)
+    try:
+        data = await omega_football.get_fixtures(league_code)
+    except Exception as exc:
+        logger.error(f"get_fixtures error {league_code}: {exc}", exc_info=True)
+        data = {"error": True}
     if isinstance(data, dict) and data.get("error"):
-        await send(t("error", lang))
+        no_data = "لا تتوفر بيانات حالياً — اضغط تحديث" if lang == "ar" else "No data available right now — press Refresh"
+        try:
+            await send(no_data, reply_markup=_matchday_kb(league_code.upper(), lang))
+        except Exception:
+            await send(no_data)
         return
     selection = _today(data) or _nearest(data)
     if not selection:
-        await send(t("fb_no_live", lang))
+        try:
+            await send(t("fb_no_live", lang), reply_markup=_matchday_kb(league_code.upper(), lang))
+        except Exception:
+            await send(t("fb_no_live", lang))
         return
     league_name = _league_name(league_code, lang)
     card = _matchday_card(selection[:12], league_name, lang)
     kb   = _matchday_kb(league_code.upper(), lang)
-    await send(card, parse_mode="Markdown", reply_markup=kb)
+    try:
+        await send(card, parse_mode="Markdown", reply_markup=kb)
+    except Exception:
+        await send(card, reply_markup=kb)
 
 
 async def _send_live(target, lang: str) -> None:
     send = target.answer if isinstance(target, Message) else target.message.answer
-    data = await omega_football.get_live()
+    try:
+        data = await omega_football.get_live()
+    except Exception as exc:
+        logger.error(f"get_live error: {exc}", exc_info=True)
+        await send(t("fb_no_live", lang))
+        return
     if isinstance(data, dict) and data.get("error"):
         await send(t("fb_no_live", lang))
         return
     if not data:
         await send(t("fb_no_live", lang))
         return
-    # Group by league for a clean overview — pick the right-language name
     by_league: dict[str, list] = {}
     for f in data[:20]:
         if lang == "ar":
@@ -289,7 +307,10 @@ async def _send_live(target, lang: str) -> None:
         by_league.setdefault(key, []).append(f)
     for league_name, matches in by_league.items():
         card = _matchday_card(matches, league_name, lang)
-        await send(card, parse_mode="Markdown")
+        try:
+            await send(card, parse_mode="Markdown")
+        except Exception:
+            await send(card)
 
 
 # ── command handler ────────────────────────────────────────────────────────────
@@ -403,7 +424,12 @@ async def handle_fb_team_cb(callback: CallbackQuery, lang: str = "en") -> None:
         return
     team_name = teams[team_idx]["name"]
 
-    sched = await omega_football.get_team_schedule_by_name(team_name, league_code)
+    try:
+        sched = await omega_football.get_team_schedule_by_name(team_name, league_code)
+    except Exception as exc:
+        logger.error(f"get_team_schedule_by_name error: {exc}", exc_info=True)
+        await callback.message.answer(t("error", lang))
+        return
     card  = _team_schedule_card(sched, team_name, league_name, lang)
 
     back_lbl   = "🔙 الفرق"  if lang == "ar" else "🔙 Teams"
@@ -412,7 +438,10 @@ async def handle_fb_team_cb(callback: CallbackQuery, lang: str = "en") -> None:
         InlineKeyboardButton(text=back_lbl,   callback_data=f"fb_teams:{league_code.lower()}"),
         InlineKeyboardButton(text=reload_lbl, callback_data=f"fb_t:{team_idx}:{league_code}"),
     ]])
-    await callback.message.answer(card, parse_mode="Markdown", reply_markup=back_kb)
+    try:
+        await callback.message.answer(card, parse_mode="Markdown", reply_markup=back_kb)
+    except Exception:
+        await callback.message.answer(card, reply_markup=back_kb)
 
 
 # ── callback: match events ─────────────────────────────────────────────────────
@@ -424,12 +453,20 @@ async def handle_fb_events_cb(callback: CallbackQuery, lang: str = "en") -> None
         fixture_id = int(callback.data.split(":")[1])
     except (IndexError, ValueError):
         return
-    events = await omega_football.get_events(fixture_id)
+    try:
+        events = await omega_football.get_events(fixture_id)
+    except Exception as exc:
+        logger.error(f"get_events error: {exc}", exc_info=True)
+        await callback.message.answer(t("error", lang))
+        return
     if isinstance(events, dict) and events.get("error"):
         await callback.message.answer(t("error", lang))
         return
     text = _fmt_events(events if isinstance(events, list) else [], lang)
-    await callback.message.answer(text, parse_mode="Markdown")
+    try:
+        await callback.message.answer(text, parse_mode="Markdown")
+    except Exception:
+        await callback.message.answer(text)
 
 
 def register_football_handlers(dp) -> None:
