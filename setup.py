@@ -8201,16 +8201,17 @@ async def handle_fb_teams_cb(callback: CallbackQuery, lang: str = "en") -> None:
 
     choose_lbl = "🏟️ اختر الفريق:" if lang == "ar" else "🏟️ Choose a team:"
     text = f"⚽ *{league_name}*\n\n{choose_lbl}"
+    logger.info(f"DEBUG before keyboard: teams={len(teams)} league={league_code} lang={lang}")
+    kb = _team_kb(teams, league_code, lang)
+    logger.info(f"DEBUG kb built: rows={len(kb.inline_keyboard)} first_row_btns={len(kb.inline_keyboard[0]) if kb.inline_keyboard else 0}")
     try:
-        await callback.message.edit_text(
-            text, parse_mode="Markdown",
-            reply_markup=_team_kb(teams, league_code, lang),
-        )
-    except Exception:
-        await callback.message.answer(
-            text, parse_mode="Markdown",
-            reply_markup=_team_kb(teams, league_code, lang),
-        )
+        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
+    except Exception as exc:
+        logger.warning(f"DEBUG edit_text failed: {exc}")
+        try:
+            await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
+        except Exception as exc2:
+            logger.error(f"DEBUG answer failed: {exc2}", exc_info=True)
 
 
 # ── callback: team schedule ───────────────────────────────────────────────────
