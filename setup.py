@@ -8009,7 +8009,7 @@ def _team_kb(teams: list, league_code: str, lang: str = "ar") -> InlineKeyboardM
     """Index-based callback — stays within 64-byte limit."""
     btns = [
         InlineKeyboardButton(
-            text=tm["name"],
+            text=(tm.get("name_ar") or tm["name"]) if lang == "ar" else tm["name"],
             callback_data=f"fb_t:{i}:{league_code}",
         )
         for i, tm in enumerate(teams[:24])
@@ -8226,11 +8226,23 @@ async def handle_fb_teams_cb(callback: CallbackQuery, lang: str = "en") -> None:
     await callback.answer("⏳")
     league_code = callback.data.split(":", 1)[1].upper()
     league_name = _league_name(league_code, lang)
-    teams = await omega_football.get_league_teams(league_code)
+
+    teams = []
+    try:
+        teams = await omega_football.get_league_teams(league_code)
+    except Exception as exc:
+        logger.error(f"get_league_teams error {league_code}: {exc}", exc_info=True)
+
+    if not teams:
+        from api_clients.omega_football import _FALLBACK_TEAMS
+        fb = _FALLBACK_TEAMS.get(league_code, [])
+        teams = [{"id": i, "name": n} for i, n in enumerate(sorted(fb))]
+
     if not teams:
         no_teams = "لا توجد فرق متاحة حالياً" if lang == "ar" else "No teams available right now"
-        await callback.answer(no_teams, show_alert=True)
+        await callback.message.answer(no_teams)
         return
+
     choose_lbl = "🏟️ اختر الفريق:" if lang == "ar" else "🏟️ Choose a team:"
     text = f"⚽ *{league_name}*\n\n{choose_lbl}"
     try:
@@ -8261,7 +8273,17 @@ async def handle_fb_team_cb(callback: CallbackQuery, lang: str = "en") -> None:
 
     league_name = _league_name(league_code, lang)
 
-    teams = await omega_football.get_league_teams(league_code)
+    teams = []
+    try:
+        teams = await omega_football.get_league_teams(league_code)
+    except Exception as exc:
+        logger.error(f"get_league_teams error {league_code}: {exc}", exc_info=True)
+
+    if not teams:
+        from api_clients.omega_football import _FALLBACK_TEAMS
+        fb = _FALLBACK_TEAMS.get(league_code, [])
+        teams = [{"id": i, "name": n} for i, n in enumerate(sorted(fb))]
+
     if team_idx >= len(teams):
         await callback.message.answer(t("error", lang))
         return
@@ -9451,6 +9473,11 @@ class UserTrackerMiddleware(BaseMiddleware):
                 msg_text = event.caption
             if msg_text and re.search(r'[\u0600-\u06FF]', msg_text):
                 data["lang"] = "ar"
+            # Also detect Arabic from callback's attached message text
+            elif isinstance(event, CallbackQuery) and event.message:
+                cb_text = (event.message.text or event.message.caption or "")
+                if cb_text and re.search(r'[\u0600-\u06FF]', cb_text):
+                    data["lang"] = "ar"
         else:
             data["lang"] = "en"
 

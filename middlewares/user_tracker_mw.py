@@ -75,6 +75,11 @@ class UserTrackerMiddleware(BaseMiddleware):
                 msg_text = event.caption
             if msg_text and re.search(r'[\u0600-\u06FF]', msg_text):
                 data["lang"] = "ar"
+            # Also detect Arabic from callback's attached message text
+            elif isinstance(event, CallbackQuery) and event.message:
+                cb_text = (event.message.text or event.message.caption or "")
+                if cb_text and re.search(r'[\u0600-\u06FF]', cb_text):
+                    data["lang"] = "ar"
         else:
             data["lang"] = "en"
 
