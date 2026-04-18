@@ -67,10 +67,11 @@ _FALLBACK_TEAMS: dict[str, list[str]] = {
         "West Ham", "Wolverhampton",
     ],
     "PD": [
-        "Alavés", "Athletic Club", "Atlético Madrid", "Barcelona", "Real Betis",
+        "Alavés", "Athletic Club", "Atlético Madrid", "Barcelona",
         "Celta Vigo", "Espanyol", "Getafe", "Girona", "Las Palmas",
-        "Leganés", "Mallorca", "Osasuna", "Rayo Vallecano", "Real Madrid",
-        "Real Sociedad", "Sevilla", "Valencia", "Valladolid", "Villarreal",
+        "Leganés", "Mallorca", "Osasuna", "Rayo Vallecano", "Real Betis",
+        "Real Madrid", "Real Sociedad", "Sevilla", "Valencia",
+        "Valladolid", "Villarreal",
     ],
     "SA": [
         "Atalanta", "Bologna", "Cagliari", "Como", "Empoli",
