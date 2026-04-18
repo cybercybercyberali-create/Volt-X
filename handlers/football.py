@@ -390,6 +390,7 @@ async def handle_fb_teams_cb(callback: CallbackQuery, lang: str = "en") -> None:
         teams = await omega_football.get_league_teams(league_code)
     except Exception as exc:
         logger.error(f"get_league_teams error {league_code}: {exc}", exc_info=True)
+    logger.info(f"DEBUG teams result: count={len(teams)} first={teams[:2] if teams else 'EMPTY'}")
 
     if not teams:
         from api_clients.omega_football import _FALLBACK_TEAMS

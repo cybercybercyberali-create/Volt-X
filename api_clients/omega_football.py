@@ -575,81 +575,37 @@ class OmegaFootball:
         return {"error": True}
 
     async def get_league_teams(self, league_code: str) -> list[dict]:
-        """Return sorted [{id, name}] for a league via standings, fallback to day-scan."""
-        lc    = league_code.upper()
-        sf_id = _SF_TOURNAMENT_IDS.get(lc)     # may be None — still try other sources
+        """Return sorted [{id, name}] for a league. TheSportsDB first, hardcoded fallback second."""
+        lc        = league_code.upper()
         cache_key = f"sfsc:league_teams:{lc}"
-        cached = await cache.get(cache_key)
-        if cached:   # falsy check rejects empty lists from broken prior fetches
+        cached    = await cache.get(cache_key)
+        if cached:
             return cached
 
         teams: list[dict] = []
-        if sf_id:
+
+        # Source 1: TheSportsDB (free, no key, reliable)
+        tsdb_id = _TSDB_LEAGUE_IDS.get(lc)
+        if tsdb_id:
             try:
-                async with httpx.AsyncClient(timeout=12, follow_redirects=True) as client:
+                async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
                     r = await client.get(
-                        f"https://api.sofascore.com/api/v1/unique-tournament/{sf_id}/seasons",
-                        headers=_SF_HEADERS,
+                        f"{_TSDB_BASE}/lookup_all_teams.php",
+                        params={"id": tsdb_id},
+                        headers={"User-Agent": "Mozilla/5.0"},
                     )
                     if r.status_code == 200:
-                        seasons = r.json().get("seasons", [])
-                        if seasons:
-                            season_id = seasons[0]["id"]
-                            r2 = await client.get(
-                                f"https://api.sofascore.com/api/v1/unique-tournament/{sf_id}/season/{season_id}/standings/total",
-                                headers=_SF_HEADERS,
-                            )
-                            if r2.status_code == 200:
-                                for group in r2.json().get("standings", []):
-                                    for row in group.get("rows", []):
-                                        team = row.get("team", {})
-                                        tid, tname = team.get("id"), team.get("name", "")
-                                        if tid and tname:
-                                            teams.append({"id": tid, "name": tname})
+                        for t in (r.json().get("teams") or []):
+                            tid   = t.get("idTeam", "")
+                            tname = t.get("strTeam", "")
+                            if tid and tname:
+                                teams.append({"id": tid, "name": tname})
+                        if teams:
+                            teams.sort(key=lambda x: x["name"])
             except Exception as exc:
-                logger.warning(f"Sofascore standings for {lc}: {exc}")
+                logger.warning(f"TheSportsDB teams {lc}: {exc}")
 
-        # Fallback: scan ±21 days of Sofascore fixtures
-        if not teams and sf_id:
-            from datetime import date, timedelta
-            today = date.today()
-            team_dict: dict[int, str] = {}
-            for delta in range(-14, 22):
-                day = (today + timedelta(days=delta)).strftime("%Y-%m-%d")
-                events = await self._sofascore_raw_day(day)
-                for ev in events:
-                    if _sf_tid(ev) != sf_id:
-                        continue
-                    for side in ("homeTeam", "awayTeam"):
-                        t = ev.get(side, {})
-                        tid, tname = t.get("id"), t.get("name", "")
-                        if tid and tname:
-                            team_dict[tid] = tname
-            teams = sorted([{"id": k, "name": v} for k, v in team_dict.items()], key=lambda x: x["name"])
-
-        # Source 3: TheSportsDB all-teams endpoint
-        if not teams:
-            tsdb_id = _TSDB_LEAGUE_IDS.get(lc)
-            if tsdb_id:
-                try:
-                    async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
-                        r = await client.get(
-                            f"{_TSDB_BASE}/lookup_all_teams.php",
-                            params={"id": tsdb_id},
-                            headers={"User-Agent": "Mozilla/5.0"},
-                        )
-                        if r.status_code == 200:
-                            for t in (r.json().get("teams") or []):
-                                tid   = t.get("idTeam", "")
-                                tname = t.get("strTeam", "")
-                                if tid and tname:
-                                    teams.append({"id": tid, "name": tname})
-                            if teams:
-                                teams.sort(key=lambda x: x["name"])
-                except Exception as exc:
-                    logger.warning(f"TheSportsDB teams {lc}: {exc}")
-
-        # Last resort: hardcoded team list — always available even when all APIs blocked
+        # Source 2: hardcoded fallback — always available
         if not teams:
             fb = _FALLBACK_TEAMS.get(lc)
             if fb:
