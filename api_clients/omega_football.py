@@ -9,7 +9,7 @@ from services.cache_service import cache
 
 logger = logging.getLogger(__name__)
 
-BASE = "https://api-football-v1.p.rapidapi.com/v3"
+BASE = "https://v3.football.api-sports.io"
 CURRENT_SEASON = 2024
 
 MAJOR_LEAGUES = {
@@ -124,10 +124,7 @@ def _sf_tid(ev: dict) -> int | None:
 
 
 def _headers() -> dict:
-    return {
-        "X-RapidAPI-Key": settings.api_football_key,
-        "X-RapidAPI-Host": "api-football-v1.p.rapidapi.com",
-    }
+    return {"x-apisports-key": settings.api_football_key}
 
 
 def _normalize_sofascore(event: dict) -> dict | None:
