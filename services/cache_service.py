@@ -43,6 +43,7 @@ async def _get_redis():
             )
             await _redis_client.ping()
             logger.info("Redis connected successfully")
+            logger.info(f"[cache] Backend: Redis @ {settings.redis_url[:40]}")
         except Exception as exc:
             logger.warning(f"Redis connection failed, falling back to diskcache: {exc}")
             _redis_client = None

@@ -1774,6 +1774,7 @@ async def _get_redis():
             )
             await _redis_client.ping()
             logger.info("Redis connected successfully")
+            logger.info(f"[cache] Backend: Redis @ {settings.redis_url[:40]}")
         except Exception as exc:
             logger.warning(f"Redis connection failed, falling back to diskcache: {exc}")
             _redis_client = None
@@ -9257,6 +9258,53 @@ async def cmd_stats(message: Message, lang: str = "en") -> None:
     except Exception as exc:
         logger.error(f"Stats error: {exc}", exc_info=True)
         await message.answer(t("error", lang))
+
+
+@router.message(Command("flushteams"))
+async def cmd_flushteams(message: Message, lang: str = "en") -> None:
+    if message.from_user.id not in settings.admin_id_list:
+        await message.answer(t("admin_only", lang))
+        return
+
+    from services.cache_service import _get_redis, _get_disk_cache
+
+    redis = await _get_redis()
+    if redis:
+        backend = f"Redis @ {settings.redis_url[:30]}..."
+    else:
+        backend = "diskcache (local filesystem)"
+    logger.info(f"[flushteams] Cache backend: {backend}")
+
+    keys = [
+        "sfsc:league_teams:PD",  "sfsc:league_teams:PL",
+        "sfsc:league_teams:SA",  "sfsc:league_teams:BL1",
+        "sfsc:league_teams:FL1", "sfsc:league_teams:CL",
+        "sfsc:league_teams:SPL", "sfsc:league_teams:ELC",
+    ]
+
+    deleted = []
+    skipped = []
+    if redis:
+        for k in keys:
+            existed = await redis.delete(k)
+            (deleted if existed else skipped).append(k)
+            await redis.delete(f"backup:{k}")
+    else:
+        dc = _get_disk_cache()
+        for k in keys:
+            existed = k in dc
+            dc.delete(k)
+            dc.delete(f"backup:{k}")
+            (deleted if existed else skipped).append(k)
+
+    report = (
+        f"✅ *Cache flush complete*\n"
+        f"Backend: `{backend}`\n"
+        f"Deleted ({len(deleted)}): `{'`, `'.join(k.split(':')[-1] for k in deleted) or 'none'}`\n"
+        f"Not found ({len(skipped)}): `{'`, `'.join(k.split(':')[-1] for k in skipped) or 'none'}`"
+    )
+    logger.info(f"[flushteams] Deleted={deleted} Skipped={skipped}")
+    await message.answer(report, parse_mode="Markdown")
 
 
 def register_stats_handlers(dp) -> None:
