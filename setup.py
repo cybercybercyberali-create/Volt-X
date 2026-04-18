@@ -5506,46 +5506,19 @@ class OmegaFootball:
         return {"error": True}
 
     async def get_league_teams(self, league_code: str) -> list[dict]:
-        """Return sorted [{id, name}] for a league. TheSportsDB first, hardcoded fallback second."""
-        lc        = league_code.upper()
-        cache_key = f"sfsc:league_teams:{lc}"
-        cached    = await cache.get(cache_key)
-        if cached:
-            return cached
-
-        teams: list[dict] = []
-
-        # Source 1: TheSportsDB (free, no key, reliable)
-        tsdb_id = _TSDB_LEAGUE_IDS.get(lc)
-        if tsdb_id:
-            try:
-                async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
-                    r = await client.get(
-                        f"{_TSDB_BASE}/lookup_all_teams.php",
-                        params={"id": tsdb_id},
-                        headers={"User-Agent": "Mozilla/5.0"},
-                    )
-                    if r.status_code == 200:
-                        for t in (r.json().get("teams") or []):
-                            tid   = t.get("idTeam", "")
-                            tname = t.get("strTeam", "")
-                            if tid and tname:
-                                teams.append({"id": tid, "name": tname})
-                        if teams:
-                            teams.sort(key=lambda x: x["name"])
-            except Exception as exc:
-                logger.warning(f"TheSportsDB teams {lc}: {exc}")
-
-        # Source 2: hardcoded fallback — always available
-        if not teams:
-            fb = _FALLBACK_TEAMS.get(lc)
-            if fb:
-                teams = [{"id": i, "name": n} for i, n in enumerate(sorted(fb))]
-                logger.info(f"Using hardcoded fallback teams for {lc}: {len(teams)} teams")
-
-        if teams:
-            await cache.set(cache_key, teams, ttl=3600 * 24)
-        return teams
+        """Return hardcoded [{id, name}] for a league — no API calls, no cache."""
+        _TEAMS: dict[str, list[str]] = {
+            "PD":  ["Alavés","Athletic Club","Atlético Madrid","Barcelona","Celta Vigo","Espanyol","Getafe","Girona","Las Palmas","Leganés","Mallorca","Osasuna","Rayo Vallecano","Real Betis","Real Madrid","Real Sociedad","Sevilla","Valencia","Valladolid","Villarreal"],
+            "PL":  ["Arsenal","Aston Villa","Bournemouth","Brentford","Brighton","Chelsea","Crystal Palace","Everton","Fulham","Ipswich","Leicester","Liverpool","Man City","Man United","Newcastle","Nottm Forest","Southampton","Spurs","West Ham","Wolves"],
+            "SA":  ["AC Milan","Atalanta","Bologna","Cagliari","Como","Empoli","Fiorentina","Genoa","Inter","Juventus","Lazio","Lecce","Monza","Napoli","Parma","Roma","Torino","Udinese","Venezia","Verona"],
+            "BL1": ["Augsburg","Bayern Munich","Bochum","Borussia Dortmund","Eintracht Frankfurt","Freiburg","Hamburg","Heidenheim","Hoffenheim","Köln","Leverkusen","Mainz","Mönchengladbach","RB Leipzig","St. Pauli","Stuttgart","Union Berlin","Werder Bremen"],
+            "FL1": ["Auxerre","Brest","Lens","Lille","Lyon","Marseille","Monaco","Montpellier","Nantes","Nice","Paris FC","PSG","Reims","Rennes","Saint-Etienne","Strasbourg","Toulouse"],
+            "CL":  ["Arsenal","Atlético Madrid","Atalanta","Aston Villa","Barcelona","Bayern Munich","Benfica","Bologna","Brest","Celtic","Club Brugge","Dortmund","Feyenoord","Girona","Inter","Juventus","Leverkusen","Lille","Liverpool","Man City","Monaco","PSG","PSV","RB Leipzig","Real Madrid","Salzburg","Shakhtar","Slovan","Sparta Prague","Sporting CP","Sturm Graz","Stuttgart"],
+            "SPL": ["Al-Ahli","Al-Ettifaq","Al-Fateh","Al-Fayha","Al-Hazem","Al-Hilal","Al-Ittihad","Al-Khaleej","Al-Nassr","Al-Okhdood","Al-Orubah","Al-Qadisiyah","Al-Qadsiah","Al-Raed","Al-Riyadh","Al-Shabab","Al-Taawoun","Al-Wehda"],
+            "ELC": ["Birmingham","Blackburn","Bristol City","Burnley","Cardiff","Coventry","Derby","Leeds","Luton","Middlesbrough","Millwall","Norwich","Oxford","Plymouth","Portsmouth","Preston","QPR","Sheffield United","Sheffield Wed","Stoke","Sunderland","Swansea","Watford","West Brom"],
+        }
+        lc = league_code.upper()
+        return [{"id": i, "name": n} for i, n in enumerate(_TEAMS.get(lc, []))]
 
     async def get_team_schedule(self, team_id: int) -> dict:
         """Fetch last-5 + next-5 matches for a team from Sofascore."""
