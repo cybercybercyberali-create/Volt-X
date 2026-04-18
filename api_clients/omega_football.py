@@ -642,45 +642,50 @@ class OmegaFootball:
         return False
 
     async def get_team_schedule_by_name(self, team_name: str, league_code: str = "") -> dict:
-        """Scan Sofascore daily events to build team schedule — no Sofascore team ID needed."""
-        cache_key = f"sfsc:tsched_name:{league_code}:{team_name}"
+        """Fetch team schedule via API-Football league fixtures filtered by team name."""
+        cache_key = f"tsched_name:{league_code}:{team_name}"
         cached = await cache.get(cache_key)
         if cached is not None:
             return cached
-
-        from datetime import date, timedelta
-        today = date.today()
-        sf_id = _SF_TOURNAMENT_IDS.get(league_code.upper()) if league_code else None
 
         past: list[dict] = []
         upcoming: list[dict] = []
         live: list[dict] = []
 
-        for delta in range(-20, 10):
-            day = (today + timedelta(days=delta)).strftime("%Y-%m-%d")
-            events = await self._sofascore_raw_day(day)
-            for ev in events:
-                if sf_id and _sf_tid(ev) != sf_id:
-                    continue
-                home = ev.get("homeTeam", {}).get("name", "")
-                away = ev.get("awayTeam", {}).get("name", "")
-                if not (self._name_matches(team_name, home) or self._name_matches(team_name, away)):
-                    continue
-                n = _normalize_sofascore(ev)
-                if not n:
-                    continue
-                status = n.get("status", "NS")
-                if status in ("1H", "2H", "HT", "ET", "PEN"):
-                    live.append(n)
-                elif status == "FT":
-                    past.append(n)
-                else:
-                    upcoming.append(n)
+        league_info = MAJOR_LEAGUES.get(league_code.upper(), {}) if league_code else {}
+        league_id   = league_info.get("id")
 
-        past.sort(key=lambda x: x.get("date_utc", ""), reverse=True)
-        upcoming.sort(key=lambda x: x.get("date_utc", ""))
+        # Source 1 — API-Football: fetch league fixtures, filter by team name
+        if settings.api_football_key and league_id:
+            for season in (2025, 2024):
+                try:
+                    data = await self._get("/fixtures", {"league": league_id, "season": season, "next": 10})
+                    past_data = await self._get("/fixtures", {"league": league_id, "season": season, "last": 10})
+                    all_raw: list[dict] = []
+                    if data and "response" in data:
+                        all_raw += data["response"]
+                    if past_data and "response" in past_data:
+                        all_raw += past_data["response"]
+                    matched = []
+                    for f in all_raw:
+                        home = f.get("teams", {}).get("home", {}).get("name", "")
+                        away = f.get("teams", {}).get("away", {}).get("name", "")
+                        if self._name_matches(team_name, home) or self._name_matches(team_name, away):
+                            matched.append(_normalize_fixture(f, league_code.upper()))
+                    if matched:
+                        for n in matched:
+                            status = n.get("status", "NS")
+                            if status in ("1H", "2H", "HT", "ET", "PEN"):
+                                live.append(n)
+                            elif status == "FT":
+                                past.append(n)
+                            else:
+                                upcoming.append(n)
+                        break   # found results — no need to try next season
+                except Exception as exc:
+                    logger.warning(f"API-Football team schedule {team_name}: {exc}")
 
-        # Fallback: TheSportsDB team schedule
+        # Source 2 — TheSportsDB (if API-Football unavailable or returned nothing)
         if not (past or live or upcoming):
             _, past_raw, upcoming_raw = await self._fetch_thesportsdb_team(team_name)
             for ev in past_raw:
@@ -697,8 +702,9 @@ class OmegaFootball:
                         past.append(n)
                     else:
                         upcoming.append(n)
-            past.sort(key=lambda x: x.get("date_utc", ""), reverse=True)
-            upcoming.sort(key=lambda x: x.get("date_utc", ""))
+
+        past.sort(key=lambda x: x.get("date_utc", ""), reverse=True)
+        upcoming.sort(key=lambda x: x.get("date_utc", ""))
 
         has_data = bool(past or live or upcoming)
         result = {
