@@ -382,6 +382,7 @@ async def handle_fb_cb(callback: CallbackQuery, lang: str = "en") -> None:
 async def handle_fb_teams_cb(callback: CallbackQuery, lang: str = "en") -> None:
     await callback.answer("⏳")
     league_code = callback.data.split(":", 1)[1].upper()
+    logger.info(f"DEBUG fb_teams: raw='{callback.data}' → league_code='{league_code}' lang='{lang}'")
     league_name = _league_name(league_code, lang)
 
     teams = []
