@@ -8564,6 +8564,22 @@ from config import t
 from database.connection import get_session
 from database.crud import CRUDManager
 
+# ── Download-intent detection ───────────────────────────────────
+_DL_KW = {"download", "تحميل", "نزل", "حمل", "حمّل", "تنزيل", "دانلود"}
+_DL_DOMAINS = (
+    "youtube.com", "youtu.be", "tiktok.com", "vm.tiktok.com",
+    "instagram.com", "instagr.am", "twitter.com", "x.com",
+    "facebook.com", "fb.watch", "vimeo.com", "reddit.com", "v.redd.it",
+)
+
+def _extract_media_url(text: str) -> Optional[str]:
+    """Return first supported-platform URL found anywhere in text, or None."""
+    m = re.search(r'https?://\S+', text or "")
+    if not m:
+        return None
+    url = m.group(0).rstrip(".,;)")
+    return url if any(d in url.lower() for d in _DL_DOMAINS) else None
+
 # ── Smart routing keywords ──────────────────────────────────────
 _GOLD_KW    = {"ذهب", "gold", "فضة", "silver", "بلاتين", "platinum", "معادن", "metals",
                "غرام ذهب", "كيلو ذهب", "سعر ذهب", "gold price"}
@@ -8695,16 +8711,23 @@ SYSTEM_PROMPT = """You are Omega, a powerful AI assistant on Telegram. You are f
 
 Keep answers short and clear. Use emojis naturally. Be the smartest assistant they've ever used."""
 
-# ── Per-user conversation memory (in-process, max 8 messages) ──
+# ── Per-user conversation memory (in-process, max 10 messages, 30-min TTL) ──
 _USER_HISTORY: dict = defaultdict(list)
-_MAX_HIST = 8
+_MAX_HIST = 10
+_HISTORY_TTL = 1800  # 30 minutes in seconds
+
+def _history_prune(uid: int) -> None:
+    """Drop entries older than 30 min and reset history if all entries expired."""
+    cutoff = time.time() - _HISTORY_TTL
+    _USER_HISTORY[uid] = [m for m in _USER_HISTORY[uid] if m.get("ts", 0) > cutoff]
 
 def _history_add(uid: int, role: str, text: str) -> None:
-    _USER_HISTORY[uid].append({"role": role, "content": text[:400]})
+    _USER_HISTORY[uid].append({"role": role, "content": text[:400], "ts": time.time()})
     if len(_USER_HISTORY[uid]) > _MAX_HIST:
         _USER_HISTORY[uid] = _USER_HISTORY[uid][-_MAX_HIST:]
 
 def _history_get(uid: int) -> str:
+    _history_prune(uid)
     msgs = _USER_HISTORY.get(uid, [])
     if not msgs:
         return ""
@@ -8726,6 +8749,23 @@ async def cmd_ai(message: Message, lang: str = "en") -> None:
 
 async def _route_to_service(message: Message, query: str, lang: str) -> bool:
     """Try to route natural language query to a specific service. Returns True if handled."""
+    # ── Download intent ──────────────────────────────────────────────────────
+    url = _extract_media_url(query)
+    if url or _has_kw(query, _DL_KW):
+        if url:
+            from handlers.downloader import _pending_urls, _format_kb
+            _pending_urls[message.from_user.id] = url
+            prompt = "🎬 اختر صيغة التحميل:" if lang == "ar" else "🎬 Choose download format:"
+            await message.answer(prompt, reply_markup=_format_kb(lang))
+        else:
+            hint = (
+                "📥 أرسل الرابط الذي تريد تحميله"
+                if lang == "ar"
+                else "📥 Send the link you want to download"
+            )
+            await message.answer(hint)
+        return True
+
     # Each block has its own try/except so one failing service doesn't hide others
     # Gold & metals
     if _has_kw(query, _GOLD_KW):
