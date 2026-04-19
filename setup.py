@@ -190,6 +190,10 @@ class Settings(BaseSettings):
     alpha_vantage_key: str = Field(default="", alias="ALPHA_VANTAGE_KEY")
     polygon_api_key: str = Field(default="", alias="POLYGON_API_KEY")
 
+    # ━━━ Web Search ━━━
+    tavily_api_key: str = Field(default="", alias="TAVILY_API_KEY")
+    brave_search_key: str = Field(default="", alias="BRAVE_SEARCH_KEY")
+
     # ━━━ Database ━━━
     database_url: str = Field(default="", alias="DATABASE_URL")
     redis_url: str = Field(default="", alias="REDIS_URL")
@@ -227,12 +231,16 @@ settings = Settings()
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 FREE_MODELS = [
-    {"id": "groq/llama3-8b-8192", "provider": "groq", "model": "llama3-8b-8192", "tier": 1, "timeout": 10},
-    {"id": "groq/llama3-3-70b", "provider": "groq", "model": "llama-3.3-70b-versatile", "tier": 1, "timeout": 10},
-    {"id": "cerebras/llama3.1-70b", "provider": "cerebras", "model": "llama3.1-70b", "tier": 1, "timeout": 10},
+    # ── Tier 1: Newest-knowledge models (cutoff 2024+) ───────────────────────
+    {"id": "gemini/gemini-2.5-flash", "provider": "gemini", "model": "gemini-2.5-flash", "tier": 1, "timeout": 12},
     {"id": "gemini/gemini-2.0-flash", "provider": "gemini", "model": "gemini-2.0-flash", "tier": 1, "timeout": 12},
+    {"id": "groq/llama3-3-70b", "provider": "groq", "model": "llama-3.3-70b-versatile", "tier": 1, "timeout": 10},
+    # ── Tier 2: Fresh open-weight models via OpenRouter free tier ────────────
+    {"id": "openrouter/deepseek-v3.1:free", "provider": "openrouter", "model": "deepseek/deepseek-chat-v3.1:free", "tier": 2, "timeout": 15},
     {"id": "openrouter/llama-3.3-70b:free", "provider": "openrouter", "model": "meta-llama/llama-3.3-70b-instruct:free", "tier": 2, "timeout": 15},
+    # ── Tier 3: Quality reference models ────────────────────────────────────
     {"id": "cohere/command-r", "provider": "cohere", "model": "command-r", "tier": 3, "timeout": 15},
+    # ── Tier 4: Last-resort keyless fallback ────────────────────────────────
     {"id": "pollinations/text", "provider": "pollinations", "model": "openai", "tier": 4, "timeout": 25},
 ]
 
@@ -3707,6 +3715,133 @@ class TranslationService:
 
 
 translation_service = TranslationService()
+'''
+
+FILES["services/web_search.py"] = r'''
+"""Web search via Tavily (primary) with Brave Search as fallback.
+
+Used by the AI chat handler to ground model answers on current information
+when the query references a specific year, "today", "latest", news, etc.
+"""
+import logging
+from typing import Optional
+
+import httpx
+
+from config import settings
+
+logger = logging.getLogger(__name__)
+
+# Keywords that flag a query as time-sensitive → needs web search
+_SEARCH_TRIGGERS = {
+    # Arabic — temporal
+    "اليوم", "الآن", "الان", "حالياً", "حاليا", "آخر", "اخر", "أحدث", "احدث",
+    "هلق", "هاليومين", "هالأيام", "هالايام", "الأسبوع", "الشهر", "السنة",
+    "مؤخراً", "مؤخرا", "جديد", "الجديد",
+    # Arabic — current-events / news
+    "خبر", "أخبار", "اخبار", "حدث", "صار", "جرى", "وقع",
+    # English — temporal
+    "today", "now", "latest", "current", "recent", "currently", "nowadays",
+    "this week", "this month", "this year",
+    # English — current-events / news
+    "news", "happened", "breaking",
+    # Years → anything past training cutoff
+    "2024", "2025", "2026", "2027",
+    "٢٠٢٤", "٢٠٢٥", "٢٠٢٦", "٢٠٢٧",
+}
+
+
+def needs_web_search(query: str) -> bool:
+    """Return True if the query references recent/current information."""
+    q = (query or "").lower()
+    return any(kw in q for kw in _SEARCH_TRIGGERS)
+
+
+async def tavily_search(query: str, max_results: int = 5) -> Optional[str]:
+    """Call Tavily Search API. Returns formatted plain-text results, or None."""
+    key = settings.tavily_api_key
+    if not key:
+        return None
+
+    async with httpx.AsyncClient(timeout=10) as client:
+        try:
+            resp = await client.post(
+                "https://api.tavily.com/search",
+                json={
+                    "api_key": key,
+                    "query": query,
+                    "search_depth": "basic",
+                    "max_results": max_results,
+                    "include_answer": True,
+                    "include_raw_content": False,
+                },
+            )
+            if resp.status_code >= 400:
+                logger.warning(f"Tavily HTTP {resp.status_code}: {resp.text[:200]}")
+                return None
+            data = resp.json()
+        except Exception as exc:
+            logger.warning(f"Tavily error: {exc}")
+            return None
+
+    return _format_tavily(data)
+
+
+def _format_tavily(data: dict) -> Optional[str]:
+    lines: list[str] = []
+    answer = (data.get("answer") or "").strip()
+    if answer:
+        lines.append(f"Summary: {answer}")
+    for r in data.get("results") or []:
+        title = (r.get("title") or "").strip()
+        content = (r.get("content") or "").strip()[:250]
+        if title or content:
+            lines.append(f"- {title}: {content}")
+    return "\n".join(lines) if lines else None
+
+
+async def brave_search(query: str, max_results: int = 5) -> Optional[str]:
+    """Fallback: Brave Search API."""
+    key = settings.brave_search_key
+    if not key:
+        return None
+
+    async with httpx.AsyncClient(timeout=10) as client:
+        try:
+            resp = await client.get(
+                "https://api.search.brave.com/res/v1/web/search",
+                params={"q": query, "count": max_results},
+                headers={
+                    "Accept": "application/json",
+                    "X-Subscription-Token": key,
+                },
+            )
+            if resp.status_code >= 400:
+                logger.warning(f"Brave HTTP {resp.status_code}")
+                return None
+            data = resp.json()
+        except Exception as exc:
+            logger.warning(f"Brave error: {exc}")
+            return None
+
+    results = (data.get("web") or {}).get("results") or []
+    if not results:
+        return None
+    lines = []
+    for r in results[:max_results]:
+        title = (r.get("title") or "").strip()
+        desc = (r.get("description") or "").strip()[:250]
+        lines.append(f"- {title}: {desc}")
+    return "\n".join(lines) if lines else None
+
+
+async def web_search(query: str, max_results: int = 5) -> Optional[str]:
+    """Primary entry: try Tavily first, fall back to Brave, then None."""
+    result = await tavily_search(query, max_results)
+    if result:
+        return result
+    result = await brave_search(query, max_results)
+    return result
 '''
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -8561,6 +8696,7 @@ from services.omega_fusion import omega_fusion
 from services.omega_judge import omega_judge
 from services.omega_memory import omega_memory
 from services.rate_limiter import check_user_rate
+from services.web_search import web_search, needs_web_search
 from config import t
 from database.connection import get_session
 from database.crud import CRUDManager
@@ -8942,9 +9078,25 @@ async def process_ai_query(message: Message, query: str, lang: str = "en") -> No
             + f"\n\n[SYSTEM: User is writing in {lang_name}. You MUST respond in {lang_name}. Do not use any other language.]"
         )
 
+        # ── Optional: pull fresh web results for time-sensitive queries ─────
+        search_block = ""
+        if needs_web_search(query):
+            try:
+                results = await web_search(query, max_results=5)
+                if results:
+                    search_block = (
+                        "\n\n[WEB_SEARCH_RESULTS — use these as the source of truth "
+                        "for any current-events / time-sensitive claim; do NOT say "
+                        "you lack up-to-date info if results are present]\n"
+                        f"{results}\n[/WEB_SEARCH_RESULTS]"
+                    )
+            except Exception as exc:
+                logger.debug(f"Web search failed: {exc}")
+
         # Build query with conversation history for context
         history_text = _history_get(user_id)
-        query_with_ctx = f"{history_text}\nUser: {query}" if history_text else query
+        base = f"{history_text}\nUser: {query}" if history_text else query
+        query_with_ctx = f"{base}{search_block}"
 
         responses = await query_engine.query_all(query_with_ctx, system_prompt=enhanced_prompt, analysis=analysis)
 

@@ -76,6 +76,10 @@ class Settings(BaseSettings):
     alpha_vantage_key: str = Field(default="", alias="ALPHA_VANTAGE_KEY")
     polygon_api_key: str = Field(default="", alias="POLYGON_API_KEY")
 
+    # ━━━ Web Search ━━━
+    tavily_api_key: str = Field(default="", alias="TAVILY_API_KEY")
+    brave_search_key: str = Field(default="", alias="BRAVE_SEARCH_KEY")
+
     # ━━━ Database ━━━
     database_url: str = Field(default="", alias="DATABASE_URL")
     redis_url: str = Field(default="", alias="REDIS_URL")
@@ -113,12 +117,16 @@ settings = Settings()
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 FREE_MODELS = [
-    {"id": "groq/llama3-8b-8192", "provider": "groq", "model": "llama3-8b-8192", "tier": 1, "timeout": 10},
-    {"id": "groq/llama3-3-70b", "provider": "groq", "model": "llama-3.3-70b-versatile", "tier": 1, "timeout": 10},
-    {"id": "cerebras/llama3.1-70b", "provider": "cerebras", "model": "llama3.1-70b", "tier": 1, "timeout": 10},
+    # ── Tier 1: Newest-knowledge models (cutoff 2024+) ───────────────────────
+    {"id": "gemini/gemini-2.5-flash", "provider": "gemini", "model": "gemini-2.5-flash", "tier": 1, "timeout": 12},
     {"id": "gemini/gemini-2.0-flash", "provider": "gemini", "model": "gemini-2.0-flash", "tier": 1, "timeout": 12},
+    {"id": "groq/llama3-3-70b", "provider": "groq", "model": "llama-3.3-70b-versatile", "tier": 1, "timeout": 10},
+    # ── Tier 2: Fresh open-weight models via OpenRouter free tier ────────────
+    {"id": "openrouter/deepseek-v3.1:free", "provider": "openrouter", "model": "deepseek/deepseek-chat-v3.1:free", "tier": 2, "timeout": 15},
     {"id": "openrouter/llama-3.3-70b:free", "provider": "openrouter", "model": "meta-llama/llama-3.3-70b-instruct:free", "tier": 2, "timeout": 15},
+    # ── Tier 3: Quality reference models ────────────────────────────────────
     {"id": "cohere/command-r", "provider": "cohere", "model": "command-r", "tier": 3, "timeout": 15},
+    # ── Tier 4: Last-resort keyless fallback ────────────────────────────────
     {"id": "pollinations/text", "provider": "pollinations", "model": "openai", "tier": 4, "timeout": 25},
 ]
 

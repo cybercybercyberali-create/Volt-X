@@ -31,6 +31,7 @@ from services.omega_fusion import omega_fusion
 from services.omega_judge import omega_judge
 from services.omega_memory import omega_memory
 from services.rate_limiter import check_user_rate
+from services.web_search import web_search, needs_web_search
 from config import t
 from database.connection import get_session
 from database.crud import CRUDManager
@@ -398,9 +399,25 @@ async def process_ai_query(message: Message, query: str, lang: str = "en") -> No
             + f"\n\n[SYSTEM: User is writing in {lang_name}. You MUST respond in {lang_name}. Do not use any other language.]"
         )
 
+        # ── Optional: pull fresh web results for time-sensitive queries ─────
+        search_block = ""
+        if needs_web_search(query):
+            try:
+                results = await web_search(query, max_results=5)
+                if results:
+                    search_block = (
+                        "\n\n[WEB_SEARCH_RESULTS — use these as the source of truth "
+                        "for any current-events / time-sensitive claim; do NOT say "
+                        "you lack up-to-date info if results are present]\n"
+                        f"{results}\n[/WEB_SEARCH_RESULTS]"
+                    )
+            except Exception as exc:
+                logger.debug(f"Web search failed: {exc}")
+
         # Build query with conversation history for context
         history_text = _history_get(user_id)
-        query_with_ctx = f"{history_text}\nUser: {query}" if history_text else query
+        base = f"{history_text}\nUser: {query}" if history_text else query
+        query_with_ctx = f"{base}{search_block}"
 
         responses = await query_engine.query_all(query_with_ctx, system_prompt=enhanced_prompt, analysis=analysis)
 
