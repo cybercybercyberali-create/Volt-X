@@ -9295,6 +9295,7 @@ def register_settings_handlers(dp) -> None:
 '''
 
 FILES["handlers/downloader.py"] = r'''
+import re
 import logging
 import asyncio
 from typing import Optional
@@ -9323,6 +9324,7 @@ _SUPPORTED_DOMAINS = (
 )
 _YT_DOMAINS = ("youtube.com", "youtu.be")
 _TT_DOMAINS = ("tiktok.com", "vm.tiktok.com", "vt.tiktok.com")
+_YT_ID_RE = re.compile(r'(?:v=|youtu\.be/|/shorts/|embed/)([A-Za-z0-9_-]{11})')
 
 # user_id → URL awaiting format selection
 _pending_urls: dict[int, str] = {}
@@ -9339,6 +9341,11 @@ def _is_youtube(url: str) -> bool:
 
 def _is_tiktok(url: str) -> bool:
     return any(d in url.lower() for d in _TT_DOMAINS)
+
+
+def _extract_yt_id(url: str) -> Optional[str]:
+    m = _YT_ID_RE.search(url)
+    return m.group(1) if m else None
 
 
 def _format_kb(lang: str) -> InlineKeyboardMarkup:
@@ -9425,8 +9432,46 @@ async def _cobalt_get_url(url: str, fmt: str) -> Optional[str]:
     return None
 
 
+async def _piped_get_url(url: str, fmt: str) -> Optional[str]:
+    """Piped API — YouTube streams proxied through piped.video CDN, not IP-bound."""
+    vid_id = _extract_yt_id(url)
+    if not vid_id:
+        return None
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.get(
+            f"https://pipedapi.kavin.rocks/streams/{vid_id}",
+            headers={"User-Agent": "Mozilla/5.0"},
+        )
+        if resp.status_code >= 400:
+            logger.warning(f"Piped HTTP {resp.status_code}")
+            return None
+        data = resp.json()
+
+    if fmt == "mp3":
+        streams = sorted(
+            data.get("audioStreams") or [],
+            key=lambda x: x.get("bitrate", 0), reverse=True,
+        )
+        return streams[0].get("url") if streams else None
+
+    # Prefer combined video+audio streams (YouTube caps at 360p for these)
+    streams = [s for s in (data.get("videoStreams") or []) if not s.get("videoOnly")]
+    if not streams:
+        streams = data.get("videoStreams") or []
+
+    def _res(s: dict) -> int:
+        try:
+            return int(str(s.get("quality", "0")).rstrip("p"))
+        except (ValueError, AttributeError):
+            return 0
+
+    streams.sort(key=_res, reverse=(fmt != "low"))
+    return streams[0].get("url") if streams else None
+
+
 def _extract_direct_url(url: str, fmt: str) -> dict:
-    """yt-dlp info extraction (no download) — fallback."""
+    """yt-dlp info extraction (no download) — last-resort fallback."""
     import yt_dlp
 
     opts = {
@@ -9518,24 +9563,31 @@ async def handle_dl_cb(callback: CallbackQuery, lang: str = "en") -> None:
         title = ""
         dur = ""
 
-        # ── 1. TikTok → TikWM (returns tikwm.com URLs, never IP-bound) ─────
+        # ── 1. TikTok → TikWM (tikwm.com URLs, never IP-bound) ──────────
         if _is_tiktok(url):
             try:
                 direct = await _tikwm_get_url(url, fmt)
             except Exception as exc:
                 logger.warning(f"TikWM failed for {url!r}: {exc}")
 
-        # ── 2. cobalt.tools for YouTube / Instagram / others ─────────────
+        # ── 2. cobalt.tools (YouTube / Instagram / others) ───────────────
         if not direct:
             try:
                 direct = await _cobalt_get_url(url, fmt)
             except Exception as exc:
                 logger.warning(f"Cobalt failed for {url!r}: {exc}")
 
+        # ── 3. YouTube → Piped (proxied CDN, works from any IP) ──────────
+        if not direct and _is_youtube(url):
+            try:
+                direct = await _piped_get_url(url, fmt)
+            except Exception as exc:
+                logger.warning(f"Piped failed for {url!r}: {exc}")
+
         if direct:
             text = _build_link_reply("", "", direct, lang)
         else:
-            # ── 3. Fallback: yt-dlp ───────────────────────────────────────
+            # ── 4. yt-dlp fallback ────────────────────────────────────────
             try:
                 loop = asyncio.get_event_loop()
                 data = await loop.run_in_executor(None, _extract_direct_url, url, fmt)
@@ -9549,7 +9601,7 @@ async def handle_dl_cb(callback: CallbackQuery, lang: str = "en") -> None:
             if direct:
                 text = _build_link_reply(title, dur, direct, lang)
             else:
-                # ── 4. All failed ─────────────────────────────────────────
+                # ── 5. All failed ─────────────────────────────────────────
                 text = (
                     "⚠️ تعذّر معالجة الرابط تلقائياً.\n"
                     "جرّب: @SaveVideo_Bot أو savefrom.net"
