@@ -9322,7 +9322,9 @@ _SUPPORTED_DOMAINS = (
     "reddit.com", "v.redd.it",
 )
 _YT_DOMAINS = ("youtube.com", "youtu.be")
+_TT_DOMAINS = ("tiktok.com", "vm.tiktok.com", "vt.tiktok.com")
 
+# user_id → URL awaiting format selection
 _pending_urls: dict[int, str] = {}
 
 
@@ -9333,6 +9335,10 @@ def _is_media_url(text: str) -> bool:
 
 def _is_youtube(url: str) -> bool:
     return any(d in url.lower() for d in _YT_DOMAINS)
+
+
+def _is_tiktok(url: str) -> bool:
+    return any(d in url.lower() for d in _TT_DOMAINS)
 
 
 def _format_kb(lang: str) -> InlineKeyboardMarkup:
@@ -9361,14 +9367,39 @@ def _fmt_duration(secs: int) -> str:
     return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
 
 
+async def _tikwm_get_url(url: str, fmt: str) -> Optional[str]:
+    """TikWM API — returns tikwm.com-hosted URLs, not IP-bound TikTok CDN."""
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.get(
+            "https://www.tikwm.com/api/",
+            params={"url": url, "hd": "1"},
+            headers={"User-Agent": "Mozilla/5.0"},
+        )
+        if resp.status_code >= 400:
+            logger.warning(f"TikWM HTTP {resp.status_code}")
+            return None
+        data = resp.json()
+
+    if data.get("code") != 0:
+        logger.warning(f"TikWM error: {data.get('msg')}")
+        return None
+
+    d = data.get("data", {})
+    if fmt == "mp3":
+        return d.get("music")
+    if fmt == "low":
+        return d.get("play")
+    return d.get("hdplay") or d.get("play")
+
+
 async def _cobalt_get_url(url: str, fmt: str) -> Optional[str]:
-    """Get direct download link from cobalt.tools — no IP restrictions."""
+    """Get direct download link from cobalt.tools."""
     body = {
         "url": url,
         "videoQuality": "1080" if fmt == "high" else "480",
         "downloadMode": "audio" if fmt == "mp3" else "auto",
         "audioFormat": "mp3",
-        "alwaysProxy": True,  # tunnel through cobalt → works from any IP
+        "alwaysProxy": True,
         "filenameStyle": "basic",
     }
     async with httpx.AsyncClient(timeout=20) as client:
@@ -9395,7 +9426,7 @@ async def _cobalt_get_url(url: str, fmt: str) -> Optional[str]:
 
 
 def _extract_direct_url(url: str, fmt: str) -> dict:
-    """yt-dlp info extraction (no download) — used for non-YouTube platforms."""
+    """yt-dlp info extraction (no download) — fallback."""
     import yt_dlp
 
     opts = {
@@ -9483,19 +9514,28 @@ async def handle_dl_cb(callback: CallbackQuery, lang: str = "en") -> None:
     )
 
     try:
-        # ── 1. Try cobalt.tools for ALL platforms ─────────────────────────
         direct = None
         title = ""
         dur = ""
-        try:
-            direct = await _cobalt_get_url(url, fmt)
-        except Exception as exc:
-            logger.warning(f"Cobalt failed for {url!r}: {exc}")
+
+        # ── 1. TikTok → TikWM (returns tikwm.com URLs, never IP-bound) ─────
+        if _is_tiktok(url):
+            try:
+                direct = await _tikwm_get_url(url, fmt)
+            except Exception as exc:
+                logger.warning(f"TikWM failed for {url!r}: {exc}")
+
+        # ── 2. cobalt.tools for YouTube / Instagram / others ─────────────
+        if not direct:
+            try:
+                direct = await _cobalt_get_url(url, fmt)
+            except Exception as exc:
+                logger.warning(f"Cobalt failed for {url!r}: {exc}")
 
         if direct:
             text = _build_link_reply("", "", direct, lang)
         else:
-            # ── 2. Fallback: yt-dlp (non-YouTube platforms) ───────────────
+            # ── 3. Fallback: yt-dlp ───────────────────────────────────────
             try:
                 loop = asyncio.get_event_loop()
                 data = await loop.run_in_executor(None, _extract_direct_url, url, fmt)
@@ -9509,7 +9549,7 @@ async def handle_dl_cb(callback: CallbackQuery, lang: str = "en") -> None:
             if direct:
                 text = _build_link_reply(title, dur, direct, lang)
             else:
-                # ── 3. Both failed ────────────────────────────────────────
+                # ── 4. All failed ─────────────────────────────────────────
                 text = (
                     "⚠️ تعذّر معالجة الرابط تلقائياً.\n"
                     "جرّب: @SaveVideo_Bot أو savefrom.net"
