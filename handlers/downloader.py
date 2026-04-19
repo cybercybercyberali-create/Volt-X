@@ -1,17 +1,12 @@
 import logging
-import os
 import asyncio
-import tempfile
-import time
-import shutil
-from pathlib import Path
+import re
 from typing import Optional
 
 from aiogram import Router, F
 from aiogram.types import (
     Message, CallbackQuery,
     InlineKeyboardMarkup, InlineKeyboardButton,
-    FSInputFile,
 )
 from aiogram.filters import Command
 
@@ -19,8 +14,6 @@ from config import t
 
 logger = logging.getLogger(__name__)
 router = Router(name="downloader")
-
-MAX_BYTES = 50 * 1024 * 1024  # 50 MB Telegram bot limit
 
 _SUPPORTED_DOMAINS = (
     "youtube.com", "youtu.be",
@@ -48,46 +41,59 @@ def _format_kb(lang: str) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="📹 جودة عالية", callback_data="dl:high"),
                 InlineKeyboardButton(text="📱 جودة منخفضة", callback_data="dl:low"),
             ],
-            [InlineKeyboardButton(text="🎵 صوت MP3", callback_data="dl:mp3")],
+            [InlineKeyboardButton(text="🎵 صوت فقط", callback_data="dl:mp3")],
         ])
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="📹 High Quality", callback_data="dl:high"),
             InlineKeyboardButton(text="📱 Low Quality", callback_data="dl:low"),
         ],
-        [InlineKeyboardButton(text="🎵 Audio MP3", callback_data="dl:mp3")],
+        [InlineKeyboardButton(text="🎵 Audio Only", callback_data="dl:mp3")],
     ])
 
 
-def _build_ydl_opts(fmt: str, tmp_dir: str) -> dict:
-    base = {
-        "outtmpl": f"{tmp_dir}/%(title).80s.%(ext)s",
-        "noplaylist": True,
+def _fmt_duration(secs: int) -> str:
+    if not secs:
+        return ""
+    m, s = divmod(int(secs), 60)
+    h, m = divmod(m, 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+
+def _extract_direct_url(url: str, fmt: str) -> dict:
+    """Use yt-dlp info extraction (no download) to get the direct CDN stream URL."""
+    import yt_dlp
+
+    opts = {
         "quiet": True,
         "no_warnings": True,
-        "max_filesize": MAX_BYTES,
+        "noplaylist": True,
         "http_headers": {"User-Agent": "Mozilla/5.0"},
     }
     if fmt == "mp3":
-        base.update({
-            "format": "bestaudio/best",
-            "postprocessors": [{
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "mp3",
-                "preferredquality": "192",
-            }],
-        })
+        opts["format"] = "bestaudio/best"
     elif fmt == "low":
-        base["format"] = "bestvideo[height<=480]+bestaudio/best[height<=480]/worst[ext=mp4]/worst"
+        opts["format"] = "bestvideo[height<=480]+bestaudio/best[height<=480]/worst"
     else:
-        base["format"] = "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best[ext=mp4]/best"
-    return base
+        opts["format"] = "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"
 
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(url, download=False)
 
-def _find_output(tmp_dir: str) -> Optional[str]:
-    """Return the largest file in tmp_dir — yt-dlp may change the extension."""
-    candidates = sorted(Path(tmp_dir).iterdir(), key=lambda p: p.stat().st_size, reverse=True)
-    return str(candidates[0]) if candidates else None
+    # Merged formats (video+audio) are re-muxed; direct URL lives on the format entry
+    direct = info.get("url", "")
+    if not direct:
+        fmts = info.get("formats") or []
+        if fmts:
+            direct = fmts[-1].get("url", "")
+
+    return {
+        "title": info.get("title", ""),
+        "duration": info.get("duration", 0),
+        "direct_url": direct,
+        "ext": info.get("ext", "mp4"),
+        "is_youtube": "youtube" in url or "youtu.be" in url,
+    }
 
 
 @router.message(Command("download"))
@@ -104,7 +110,7 @@ async def cmd_download(message: Message, lang: str = "en") -> None:
 async def handle_media_url(message: Message, lang: str = "en") -> None:
     url = (message.text or "").strip()
     _pending_urls[message.from_user.id] = url
-    prompt = "🎬 اختر صيغة التحميل:" if lang == "ar" else "🎬 Choose download format:"
+    prompt = "🎬 اختر الجودة:" if lang == "ar" else "🎬 Choose quality:"
     await message.answer(prompt, reply_markup=_format_kb(lang))
 
 
@@ -124,84 +130,68 @@ async def handle_dl_cb(callback: CallbackQuery, lang: str = "en") -> None:
 
     fmt = callback.data.split(":")[1]  # high / low / mp3
     status_msg = await callback.message.answer(
-        "⏳ جارٍ التحميل..." if lang == "ar" else "⏳ Downloading..."
+        "⏳ جارٍ استخراج الرابط..." if lang == "ar" else "⏳ Extracting link..."
     )
-    tmp_dir = tempfile.mkdtemp(prefix="vx_dl_")
 
     try:
-        import yt_dlp
-
-        ydl_opts = _build_ydl_opts(fmt, tmp_dir)
         loop = asyncio.get_event_loop()
-        last_update = [time.monotonic()]
+        data = await loop.run_in_executor(None, _extract_direct_url, url, fmt)
 
-        def _progress_hook(d: dict) -> None:
-            if d.get("status") != "downloading":
-                return
-            now = time.monotonic()
-            if now - last_update[0] < 4:
-                return
-            last_update[0] = now
-            pct = d.get("_percent_str", "?%").strip()
-            spd = d.get("_speed_str", "").strip()
-            text = (
-                f"⏳ جارٍ التحميل: {pct}  {spd}"
-                if lang == "ar"
-                else f"⏳ Downloading: {pct}  {spd}"
-            )
-            asyncio.run_coroutine_threadsafe(
-                status_msg.edit_text(text), loop
-            )
+        direct = data["direct_url"]
+        title = data["title"] or "—"
+        dur = _fmt_duration(data["duration"])
+        is_yt = data["is_youtube"]
 
-        ydl_opts["progress_hooks"] = [_progress_hook]
-
-        def _do_download() -> None:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
-
-        await loop.run_in_executor(None, _do_download)
-
-        found = _find_output(tmp_dir)
-        if not found:
-            raise FileNotFoundError("yt-dlp produced no output file")
-
-        size = os.path.getsize(found)
-        if size > MAX_BYTES:
-            mb = size // (1024 * 1024)
-            over = (
-                f"⚠️ حجم الملف {mb}MB يتجاوز الحد (50MB). جرّب صيغة MP3."
-                if lang == "ar"
-                else f"⚠️ File is {mb}MB — exceeds the 50MB limit. Try Audio MP3."
-            )
-            await status_msg.edit_text(over)
-            return
-
-        await status_msg.edit_text("📤 جارٍ الإرسال..." if lang == "ar" else "📤 Sending...")
-        file_obj = FSInputFile(found)
-        if fmt == "mp3":
-            await callback.message.answer_audio(file_obj)
+        if direct:
+            dur_line = f"\n⏱ {dur}" if dur else ""
+            if lang == "ar":
+                text = (
+                    f"🎬 *{title}*{dur_line}\n\n"
+                    f"🔗 [افتح / حمّل الرابط المباشر]({direct})\n\n"
+                    f"_⚠️ الرابط مؤقت — افتحه في المتصفح للتحميل_"
+                )
+            else:
+                text = (
+                    f"🎬 *{title}*{dur_line}\n\n"
+                    f"🔗 [Open / Download Direct Link]({direct})\n\n"
+                    f"_⚠️ Link is temporary — open in browser to save_"
+                )
         else:
-            try:
-                await callback.message.answer_video(file_obj)
-            except Exception:
-                await callback.message.answer_document(file_obj)
+            # Extraction succeeded but no direct URL (common for YouTube merged formats)
+            # Fall back to the original URL
+            if lang == "ar":
+                text = (
+                    f"🎬 *{title}*\n\n"
+                    f"⚠️ تعذّر استخراج رابط مباشر.\n"
+                    f"افتح الرابط الأصلي في متصفحك:\n{url}"
+                )
+            else:
+                text = (
+                    f"🎬 *{title}*\n\n"
+                    f"⚠️ Could not extract a direct link.\n"
+                    f"Open the original link in your browser:\n{url}"
+                )
 
-        await status_msg.delete()
+        await status_msg.edit_text(text, parse_mode="Markdown")
         _pending_urls.pop(user_id, None)
 
     except Exception as exc:
-        logger.error(f"Download error for {url!r}: {exc}", exc_info=True)
-        err = (
-            f"❌ فشل التحميل: {type(exc).__name__}"
-            if lang == "ar"
-            else f"❌ Download failed: {type(exc).__name__}"
-        )
+        logger.error(f"URL extraction error for {url!r}: {exc}", exc_info=True)
+        # Final fallback: just return the original URL
+        if lang == "ar":
+            fallback = (
+                f"⚠️ تعذّر معالجة الرابط تلقائياً.\n"
+                f"يمكنك استخدام الرابط الأصلي مع أداة تحميل خارجية:\n{url}"
+            )
+        else:
+            fallback = (
+                f"⚠️ Could not process this link automatically.\n"
+                f"Use the original link with an external downloader:\n{url}"
+            )
         try:
-            await status_msg.edit_text(err)
+            await status_msg.edit_text(fallback)
         except Exception:
             pass
-    finally:
-        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 def register_downloader_handlers(dp) -> None:
