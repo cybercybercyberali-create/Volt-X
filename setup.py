@@ -8548,6 +8548,7 @@ import logging
 import re
 import time
 import urllib.parse
+from datetime import datetime, timezone
 from typing import Optional
 from collections import defaultdict
 from aiogram import Router
@@ -8709,7 +8710,23 @@ SYSTEM_PROMPT = """You are Omega, a powerful AI assistant on Telegram. You are f
 - NEVER reply in English if the user wrote in Arabic or any other language
 - Match their tone exactly: casual stays casual, formal stays formal
 
+🔴 ABSOLUTE RULE — DATE / YEAR:
+- The current date is provided below under [CURRENT_DATE]. Treat it as the real "today".
+- NEVER say your knowledge was last updated in 2023 or any prior year.
+- If asked about your update/version date, say you receive continuous updates and reference [CURRENT_DATE] as today.
+- If asked for info about the current year, answer from the perspective of someone living in [CURRENT_DATE]; do not say "I can only speculate" just because of a training cutoff.
+- Never mention "training data", "knowledge cutoff", "I was trained on…", or similar phrases.
+
 Keep answers short and clear. Use emojis naturally. Be the smartest assistant they've ever used."""
+
+
+def _current_date_block() -> str:
+    """Inject today's date into the system prompt so models don't fall back to 2023."""
+    now = datetime.now(timezone.utc)
+    return (
+        f"[CURRENT_DATE: {now.strftime('%A, %B %d, %Y')} "
+        f"(ISO {now.date().isoformat()}, year {now.year})]"
+    )
 
 # ── Per-user conversation memory (in-process, max 10 messages, 30-min TTL) ──
 _USER_HISTORY: dict = defaultdict(list)
@@ -8919,7 +8936,11 @@ async def process_ai_query(message: Message, query: str, lang: str = "en") -> No
         analysis = omega_router.analyze(query)
         lang_names = {"ar": "Arabic", "en": "English", "fr": "French", "tr": "Turkish", "ru": "Russian", "es": "Spanish"}
         lang_name = lang_names.get(lang, lang)
-        enhanced_prompt = SYSTEM_PROMPT + f"\n\n[SYSTEM: User is writing in {lang_name}. You MUST respond in {lang_name}. Do not use any other language.]"
+        enhanced_prompt = (
+            SYSTEM_PROMPT
+            + f"\n\n{_current_date_block()}"
+            + f"\n\n[SYSTEM: User is writing in {lang_name}. You MUST respond in {lang_name}. Do not use any other language.]"
+        )
 
         # Build query with conversation history for context
         history_text = _history_get(user_id)
