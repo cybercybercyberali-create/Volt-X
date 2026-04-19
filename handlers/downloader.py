@@ -1,8 +1,8 @@
 import logging
 import asyncio
-import re
 from typing import Optional
 
+import httpx
 from aiogram import Router, F
 from aiogram.types import (
     Message, CallbackQuery,
@@ -24,6 +24,7 @@ _SUPPORTED_DOMAINS = (
     "vimeo.com",
     "reddit.com", "v.redd.it",
 )
+_YT_DOMAINS = ("youtube.com", "youtu.be")
 
 # user_id → URL awaiting format selection
 _pending_urls: dict[int, str] = {}
@@ -32,6 +33,10 @@ _pending_urls: dict[int, str] = {}
 def _is_media_url(text: str) -> bool:
     text = (text or "").strip().lower()
     return text.startswith("http") and any(d in text for d in _SUPPORTED_DOMAINS)
+
+
+def _is_youtube(url: str) -> bool:
+    return any(d in url.lower() for d in _YT_DOMAINS)
 
 
 def _format_kb(lang: str) -> InlineKeyboardMarkup:
@@ -60,8 +65,34 @@ def _fmt_duration(secs: int) -> str:
     return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
 
 
+async def _cobalt_get_url(url: str, fmt: str) -> Optional[str]:
+    """Get direct download link from cobalt.tools — no IP restrictions."""
+    body = {
+        "url": url,
+        "videoQuality": "1080" if fmt == "high" else "480",
+        "downloadMode": "audio" if fmt == "mp3" else "auto",
+        "audioFormat": "mp3",
+    }
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.post(
+            "https://api.cobalt.tools/",
+            json=body,
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+    status = data.get("status")
+    if status in ("redirect", "tunnel", "stream"):
+        return data.get("url")
+    if status == "picker":
+        items = data.get("picker") or []
+        return items[0].get("url") if items else None
+    return None
+
+
 def _extract_direct_url(url: str, fmt: str) -> dict:
-    """Use yt-dlp info extraction (no download) to get the direct CDN stream URL."""
+    """yt-dlp info extraction (no download) — used for non-YouTube platforms."""
     import yt_dlp
 
     opts = {
@@ -80,7 +111,6 @@ def _extract_direct_url(url: str, fmt: str) -> dict:
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=False)
 
-    # Merged formats (video+audio) are re-muxed; direct URL lives on the format entry
     direct = info.get("url", "")
     if not direct:
         fmts = info.get("formats") or []
@@ -91,9 +121,22 @@ def _extract_direct_url(url: str, fmt: str) -> dict:
         "title": info.get("title", ""),
         "duration": info.get("duration", 0),
         "direct_url": direct,
-        "ext": info.get("ext", "mp4"),
-        "is_youtube": "youtube" in url or "youtu.be" in url,
     }
+
+
+def _build_link_reply(title: str, dur: str, direct: str, lang: str) -> str:
+    dur_line = f"\n⏱ {dur}" if dur else ""
+    if lang == "ar":
+        return (
+            f"🎬 *{title}*{dur_line}\n\n"
+            f"🔗 [افتح / حمّل الرابط المباشر]({direct})\n\n"
+            f"_⚠️ الرابط مؤقت — افتحه في المتصفح للتحميل_"
+        )
+    return (
+        f"🎬 *{title}*{dur_line}\n\n"
+        f"🔗 [Open / Download Direct Link]({direct})\n\n"
+        f"_⚠️ Link is temporary — open in browser to save_"
+    )
 
 
 @router.message(Command("download"))
@@ -120,12 +163,11 @@ async def handle_dl_cb(callback: CallbackQuery, lang: str = "en") -> None:
     user_id = callback.from_user.id
     url = _pending_urls.get(user_id)
     if not url:
-        no_url = (
+        await callback.message.answer(
             "❌ لم يُعثر على رابط. أرسل الرابط مجدداً."
             if lang == "ar"
             else "❌ No URL found. Please send the link again."
         )
-        await callback.message.answer(no_url)
         return
 
     fmt = callback.data.split(":")[1]  # high / low / mp3
@@ -134,60 +176,52 @@ async def handle_dl_cb(callback: CallbackQuery, lang: str = "en") -> None:
     )
 
     try:
-        loop = asyncio.get_event_loop()
-        data = await loop.run_in_executor(None, _extract_direct_url, url, fmt)
+        if _is_youtube(url):
+            # ── cobalt.tools path — no Render IP issues ───────────────────
+            direct = None
+            try:
+                direct = await _cobalt_get_url(url, fmt)
+            except Exception as exc:
+                logger.warning(f"Cobalt error for {url!r}: {exc}")
 
-        direct = data["direct_url"]
-        title = data["title"] or "—"
-        dur = _fmt_duration(data["duration"])
-        is_yt = data["is_youtube"]
-
-        if direct:
-            dur_line = f"\n⏱ {dur}" if dur else ""
-            if lang == "ar":
-                text = (
-                    f"🎬 *{title}*{dur_line}\n\n"
-                    f"🔗 [افتح / حمّل الرابط المباشر]({direct})\n\n"
-                    f"_⚠️ الرابط مؤقت — افتحه في المتصفح للتحميل_"
-                )
+            if direct:
+                text = _build_link_reply("YouTube", "", direct, lang)
             else:
                 text = (
-                    f"🎬 *{title}*{dur_line}\n\n"
-                    f"🔗 [Open / Download Direct Link]({direct})\n\n"
-                    f"_⚠️ Link is temporary — open in browser to save_"
+                    "⚠️ يوتيوب لا يمكن معالجته تلقائياً.\n"
+                    "جرّب: @SaveVideo_Bot أو savefrom.net"
+                    if lang == "ar"
+                    else
+                    "⚠️ YouTube could not be processed automatically.\n"
+                    "Try: @SaveVideo_Bot or savefrom.net"
                 )
         else:
-            # Extraction succeeded but no direct URL (common for YouTube merged formats)
-            # Fall back to the original URL
-            if lang == "ar":
-                text = (
-                    f"🎬 *{title}*\n\n"
-                    f"⚠️ تعذّر استخراج رابط مباشر.\n"
-                    f"افتح الرابط الأصلي في متصفحك:\n{url}"
-                )
+            # ── yt-dlp path — TikTok / Instagram / Reddit / etc. ─────────
+            loop = asyncio.get_event_loop()
+            data = await loop.run_in_executor(None, _extract_direct_url, url, fmt)
+            direct = data["direct_url"]
+            title = data["title"] or "—"
+            dur = _fmt_duration(data["duration"])
+
+            if direct:
+                text = _build_link_reply(title, dur, direct, lang)
             else:
                 text = (
-                    f"🎬 *{title}*\n\n"
-                    f"⚠️ Could not extract a direct link.\n"
-                    f"Open the original link in your browser:\n{url}"
+                    f"⚠️ تعذّر استخراج رابط مباشر.\nافتح الرابط الأصلي:\n{url}"
+                    if lang == "ar"
+                    else f"⚠️ Could not extract a direct link.\nOpen the original:\n{url}"
                 )
 
         await status_msg.edit_text(text, parse_mode="Markdown")
         _pending_urls.pop(user_id, None)
 
     except Exception as exc:
-        logger.error(f"URL extraction error for {url!r}: {exc}", exc_info=True)
-        # Final fallback: just return the original URL
-        if lang == "ar":
-            fallback = (
-                f"⚠️ تعذّر معالجة الرابط تلقائياً.\n"
-                f"يمكنك استخدام الرابط الأصلي مع أداة تحميل خارجية:\n{url}"
-            )
-        else:
-            fallback = (
-                f"⚠️ Could not process this link automatically.\n"
-                f"Use the original link with an external downloader:\n{url}"
-            )
+        logger.error(f"Downloader error for {url!r}: {exc}", exc_info=True)
+        fallback = (
+            f"⚠️ تعذّر معالجة الرابط.\nجرّب: @SaveVideo_Bot أو savefrom.net\n{url}"
+            if lang == "ar"
+            else f"⚠️ Could not process this link.\nTry: @SaveVideo_Bot or savefrom.net\n{url}"
+        )
         try:
             await status_msg.edit_text(fallback)
         except Exception:
