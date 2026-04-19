@@ -176,40 +176,40 @@ async def handle_dl_cb(callback: CallbackQuery, lang: str = "en") -> None:
     )
 
     try:
-        if _is_youtube(url):
-            # ── cobalt.tools path — no Render IP issues ───────────────────
-            direct = None
-            try:
-                direct = await _cobalt_get_url(url, fmt)
-            except Exception as exc:
-                logger.warning(f"Cobalt error for {url!r}: {exc}")
+        # ── 1. Try cobalt.tools for ALL platforms ─────────────────────────
+        direct = None
+        title = ""
+        dur = ""
+        try:
+            direct = await _cobalt_get_url(url, fmt)
+        except Exception as exc:
+            logger.warning(f"Cobalt failed for {url!r}: {exc}")
 
-            if direct:
-                text = _build_link_reply("YouTube", "", direct, lang)
-            else:
-                text = (
-                    "⚠️ يوتيوب لا يمكن معالجته تلقائياً.\n"
-                    "جرّب: @SaveVideo_Bot أو savefrom.net"
-                    if lang == "ar"
-                    else
-                    "⚠️ YouTube could not be processed automatically.\n"
-                    "Try: @SaveVideo_Bot or savefrom.net"
-                )
+        if direct:
+            text = _build_link_reply("", "", direct, lang)
         else:
-            # ── yt-dlp path — TikTok / Instagram / Reddit / etc. ─────────
-            loop = asyncio.get_event_loop()
-            data = await loop.run_in_executor(None, _extract_direct_url, url, fmt)
-            direct = data["direct_url"]
-            title = data["title"] or "—"
-            dur = _fmt_duration(data["duration"])
+            # ── 2. Fallback: yt-dlp (non-YouTube platforms) ───────────────
+            try:
+                loop = asyncio.get_event_loop()
+                data = await loop.run_in_executor(None, _extract_direct_url, url, fmt)
+                direct = data["direct_url"]
+                title = data["title"] or "—"
+                dur = _fmt_duration(data["duration"])
+            except Exception as exc:
+                logger.warning(f"yt-dlp failed for {url!r}: {exc}")
+                direct = None
 
             if direct:
                 text = _build_link_reply(title, dur, direct, lang)
             else:
+                # ── 3. Both failed ────────────────────────────────────────
                 text = (
-                    f"⚠️ تعذّر استخراج رابط مباشر.\nافتح الرابط الأصلي:\n{url}"
+                    "⚠️ تعذّر معالجة الرابط تلقائياً.\n"
+                    "جرّب: @SaveVideo_Bot أو savefrom.net"
                     if lang == "ar"
-                    else f"⚠️ Could not extract a direct link.\nOpen the original:\n{url}"
+                    else
+                    "⚠️ Could not process this link automatically.\n"
+                    "Try: @SaveVideo_Bot or savefrom.net"
                 )
 
         await status_msg.edit_text(text, parse_mode="Markdown")
