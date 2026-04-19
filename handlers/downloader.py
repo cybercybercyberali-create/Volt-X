@@ -72,22 +72,29 @@ async def _cobalt_get_url(url: str, fmt: str) -> Optional[str]:
         "videoQuality": "1080" if fmt == "high" else "480",
         "downloadMode": "audio" if fmt == "mp3" else "auto",
         "audioFormat": "mp3",
+        "alwaysProxy": True,  # tunnel through cobalt → works from any IP
+        "filenameStyle": "basic",
     }
-    async with httpx.AsyncClient(timeout=15) as client:
+    async with httpx.AsyncClient(timeout=20) as client:
         resp = await client.post(
             "https://api.cobalt.tools/",
             json=body,
             headers={"Content-Type": "application/json", "Accept": "application/json"},
         )
-        resp.raise_for_status()
+        if resp.status_code >= 400:
+            logger.warning(f"Cobalt HTTP {resp.status_code}: {resp.text[:200]}")
+            return None
         data = resp.json()
 
     status = data.get("status")
-    if status in ("redirect", "tunnel", "stream"):
+    if status in ("redirect", "tunnel", "stream", "local-processing"):
         return data.get("url")
     if status == "picker":
         items = data.get("picker") or []
         return items[0].get("url") if items else None
+    if status == "error":
+        err = (data.get("error") or {}).get("code", "unknown")
+        logger.warning(f"Cobalt error for {url!r}: {err}")
     return None
 
 
@@ -125,15 +132,19 @@ def _extract_direct_url(url: str, fmt: str) -> dict:
 
 
 def _build_link_reply(title: str, dur: str, direct: str, lang: str) -> str:
-    dur_line = f"\n⏱ {dur}" if dur else ""
+    title_line = f"🎬 *{title}*\n" if title else ""
+    dur_line = f"⏱ {dur}\n" if dur else ""
+    head = title_line + dur_line
+    if head:
+        head += "\n"
     if lang == "ar":
         return (
-            f"🎬 *{title}*{dur_line}\n\n"
+            f"{head}"
             f"🔗 [افتح / حمّل الرابط المباشر]({direct})\n\n"
             f"_⚠️ الرابط مؤقت — افتحه في المتصفح للتحميل_"
         )
     return (
-        f"🎬 *{title}*{dur_line}\n\n"
+        f"{head}"
         f"🔗 [Open / Download Direct Link]({direct})\n\n"
         f"_⚠️ Link is temporary — open in browser to save_"
     )
