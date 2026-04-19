@@ -21,12 +21,14 @@ _KB_AR = [
     ["⛽ محروقات",  "🌤 طقس",      "🥇 ذهب"],
     ["💱 عملة",     "⚽ كرة قدم",  "🎬 أفلام"],
     ["🤖 ذكاء اصطناعي", "✈️ رحلات", "🌍 زلازل"],
+    ["📥 تحميل",   "🎙️ نسخ صوتي"],
     ["⚙️ إعدادات"],
 ]
 _KB_EN = [
     ["⛽ Fuel",     "🌤 Weather",  "🥇 Gold"],
     ["💱 Currency", "⚽ Football", "🎬 Movies"],
     ["🤖 AI Chat",  "✈️ Flights",  "🌍 Quakes"],
+    ["📥 Downloader", "🎙️ Transcriber"],
     ["⚙️ Settings"],
 ]
 
@@ -43,16 +45,18 @@ for _row in _KB_EN:
 
 # Extra exact mappings for ambiguous labels
 _BTN_MAP.update({
-    "⛽ محروقات": "fuel",    "⛽ Fuel": "fuel",
-    "🌤 طقس": "weather",     "🌤 Weather": "weather",
-    "🥇 ذهب": "gold",        "🥇 Gold": "gold",
-    "💱 عملة": "currency",   "💱 Currency": "currency",
-    "⚽ كرة قدم": "football","⚽ Football": "football",
-    "🎬 أفلام": "movies",    "🎬 Movies": "movies",
-    "🤖 ذكاء اصطناعي": "ai","🤖 AI Chat": "ai",
-    "✈️ رحلات": "flights",  "✈️ Flights": "flights",
-    "🌍 زلازل": "quakes",   "🌍 Quakes": "quakes",
-    "⚙️ إعدادات": "settings","⚙️ Settings": "settings",
+    "⛽ محروقات": "fuel",        "⛽ Fuel": "fuel",
+    "🌤 طقس": "weather",         "🌤 Weather": "weather",
+    "🥇 ذهب": "gold",            "🥇 Gold": "gold",
+    "💱 عملة": "currency",       "💱 Currency": "currency",
+    "⚽ كرة قدم": "football",    "⚽ Football": "football",
+    "🎬 أفلام": "movies",        "🎬 Movies": "movies",
+    "🤖 ذكاء اصطناعي": "ai",    "🤖 AI Chat": "ai",
+    "✈️ رحلات": "flights",      "✈️ Flights": "flights",
+    "🌍 زلازل": "quakes",       "🌍 Quakes": "quakes",
+    "📥 تحميل": "downloader",   "📥 Downloader": "downloader",
+    "🎙️ نسخ صوتي": "transcriber", "🎙️ Transcriber": "transcriber",
+    "⚙️ إعدادات": "settings",   "⚙️ Settings": "settings",
 })
 
 
@@ -117,6 +121,12 @@ async def _dispatch_key(message: Message, key: str, lang: str) -> None:
                 e = "🟥" if mag >= 6 else ("🟧" if mag >= 5 else "🟨")
                 lines.append(f"{e} M{mag:.1f} — {place}")
             await message.answer("\n".join(lines), parse_mode="Markdown")
+        elif key == "downloader":
+            from handlers.downloader import cmd_download
+            await cmd_download(message, lang=lang)
+        elif key == "transcriber":
+            from handlers.transcriber import cmd_transcribe
+            await cmd_transcribe(message, lang=lang)
         elif key == "settings":
             from handlers.settings import cmd_settings
             await cmd_settings(message, lang=lang)

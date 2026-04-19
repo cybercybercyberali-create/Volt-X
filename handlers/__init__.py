@@ -5,6 +5,8 @@ from handlers.fuel import register_fuel_handlers
 from handlers.weather import register_weather_handlers
 from handlers.football import register_football_handlers
 from handlers.movies import register_movies_handlers
+from handlers.downloader import register_downloader_handlers
+from handlers.transcriber import register_transcriber_handlers
 
 from handlers.ai_chat import register_ai_handlers
 from handlers.stocks import register_stocks_handlers
@@ -23,6 +25,9 @@ def register_all_handlers(dp):
     register_weather_handlers(dp)
     register_football_handlers(dp)
     register_movies_handlers(dp)
+    # Downloader and Transcriber must come before the AI catch-all
+    register_downloader_handlers(dp)
+    register_transcriber_handlers(dp)
 
     register_ai_handlers(dp)
     register_stocks_handlers(dp)

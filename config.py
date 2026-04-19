@@ -714,6 +714,66 @@ I18N = {
         "fr": "⏳ Veuillez patienter un instant", "es": "⏳ Espera un momento e inténtalo de nuevo",
         "tr": "⏳ Lütfen bir dakika bekleyin", "ru": "⏳ Подождите немного",
     },
+    # ── Downloader ────────────────────────────────────────────────────────────
+    "dl_hint": {
+        "ar": "📥 أرسل رابطاً من يوتيوب أو تيك توك أو إنستغرام...",
+        "en": "📥 Send a YouTube, TikTok, or Instagram link to download it.",
+        "fr": "📥 Envoyez un lien YouTube, TikTok ou Instagram.",
+        "tr": "📥 YouTube, TikTok veya Instagram bağlantısı gönderin.",
+    },
+    "dl_choose_format": {
+        "ar": "🎬 اختر صيغة التحميل:", "en": "🎬 Choose download format:",
+        "fr": "🎬 Choisissez le format:", "tr": "🎬 Format seçin:",
+    },
+    "dl_downloading": {
+        "ar": "⏳ جارٍ التحميل...", "en": "⏳ Downloading...",
+        "fr": "⏳ Téléchargement...", "tr": "⏳ İndiriliyor...",
+    },
+    "dl_sending": {
+        "ar": "📤 جارٍ الإرسال...", "en": "📤 Sending...",
+        "fr": "📤 Envoi en cours...", "tr": "📤 Gönderiliyor...",
+    },
+    "dl_too_large": {
+        "ar": "⚠️ الملف أكبر من 50MB. جرّب صيغة MP3.",
+        "en": "⚠️ File exceeds 50MB limit. Try Audio MP3 instead.",
+        "fr": "⚠️ Fichier > 50MB. Essayez le format MP3.",
+        "tr": "⚠️ Dosya 50MB'ı aşıyor. MP3 formatını deneyin.",
+    },
+    "dl_no_url": {
+        "ar": "❌ لم يُعثر على رابط. أرسل الرابط مجدداً.",
+        "en": "❌ No URL found. Please send the link again.",
+        "fr": "❌ Aucun lien trouvé. Renvoyez le lien.",
+        "tr": "❌ URL bulunamadı. Lütfen bağlantıyı tekrar gönderin.",
+    },
+    # ── Transcriber ───────────────────────────────────────────────────────────
+    "tr_hint": {
+        "ar": "🎙️ أرسل رسالة صوتية أو مقطع فيديو لتحويله إلى نص.",
+        "en": "🎙️ Send a voice message, video, or audio file to transcribe it.",
+        "fr": "🎙️ Envoyez un message vocal ou une vidéo pour le transcrire.",
+        "tr": "🎙️ Sesli mesaj veya video gönderin, metne dönüştüreyim.",
+    },
+    "tr_transcribing": {
+        "ar": "🎙️ جارٍ النسخ...", "en": "🎙️ Transcribing...",
+        "fr": "🎙️ Transcription en cours...", "tr": "🎙️ Yazıya dökülüyor...",
+    },
+    "tr_summarizing": {
+        "ar": "⏳ جارٍ التلخيص...", "en": "⏳ Summarizing...",
+        "fr": "⏳ Résumé en cours...", "tr": "⏳ Özetleniyor...",
+    },
+    "tr_no_speech": {
+        "ar": "❌ لم يُتعرَّف على أي كلام.", "en": "❌ No speech detected in the file.",
+        "fr": "❌ Aucune parole détectée.", "tr": "❌ Konuşma algılanamadı.",
+    },
+    "tr_no_key": {
+        "ar": "❌ مفتاح Groq غير مُهيَّأ.", "en": "❌ Groq API key is not configured.",
+        "fr": "❌ Clé Groq non configurée.", "tr": "❌ Groq API anahtarı yapılandırılmamış.",
+    },
+    "tr_no_ffmpeg": {
+        "ar": "⚠️ تعذّر استخراج الصوت. أرسل ملف صوت مباشرةً.",
+        "en": "⚠️ Could not extract audio. Please send an audio file directly.",
+        "fr": "⚠️ Extraction audio impossible. Envoyez un fichier audio directement.",
+        "tr": "⚠️ Ses çıkarılamadı. Lütfen doğrudan ses dosyası gönderin.",
+    },
 }
 
 

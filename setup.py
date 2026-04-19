@@ -41,6 +41,7 @@ tenacity==8.4.1
 cachetools==5.3.3
 orjson==3.10.5
 psutil==5.9.8
+yt-dlp>=2024.1.1
 """
 
 FILES[".env.example"] = """
@@ -826,6 +827,66 @@ I18N = {
         "ar": "⏳ انتظر قليلاً ثم حاول مجدداً", "en": "⏳ Please wait a moment and try again",
         "fr": "⏳ Veuillez patienter un instant", "es": "⏳ Espera un momento e inténtalo de nuevo",
         "tr": "⏳ Lütfen bir dakika bekleyin", "ru": "⏳ Подождите немного",
+    },
+    # ── Downloader ────────────────────────────────────────────────────────────
+    "dl_hint": {
+        "ar": "📥 أرسل رابطاً من يوتيوب أو تيك توك أو إنستغرام...",
+        "en": "📥 Send a YouTube, TikTok, or Instagram link to download it.",
+        "fr": "📥 Envoyez un lien YouTube, TikTok ou Instagram.",
+        "tr": "📥 YouTube, TikTok veya Instagram bağlantısı gönderin.",
+    },
+    "dl_choose_format": {
+        "ar": "🎬 اختر صيغة التحميل:", "en": "🎬 Choose download format:",
+        "fr": "🎬 Choisissez le format:", "tr": "🎬 Format seçin:",
+    },
+    "dl_downloading": {
+        "ar": "⏳ جارٍ التحميل...", "en": "⏳ Downloading...",
+        "fr": "⏳ Téléchargement...", "tr": "⏳ İndiriliyor...",
+    },
+    "dl_sending": {
+        "ar": "📤 جارٍ الإرسال...", "en": "📤 Sending...",
+        "fr": "📤 Envoi en cours...", "tr": "📤 Gönderiliyor...",
+    },
+    "dl_too_large": {
+        "ar": "⚠️ الملف أكبر من 50MB. جرّب صيغة MP3.",
+        "en": "⚠️ File exceeds 50MB limit. Try Audio MP3 instead.",
+        "fr": "⚠️ Fichier > 50MB. Essayez le format MP3.",
+        "tr": "⚠️ Dosya 50MB'ı aşıyor. MP3 formatını deneyin.",
+    },
+    "dl_no_url": {
+        "ar": "❌ لم يُعثر على رابط. أرسل الرابط مجدداً.",
+        "en": "❌ No URL found. Please send the link again.",
+        "fr": "❌ Aucun lien trouvé. Renvoyez le lien.",
+        "tr": "❌ URL bulunamadı. Lütfen bağlantıyı tekrar gönderin.",
+    },
+    # ── Transcriber ───────────────────────────────────────────────────────────
+    "tr_hint": {
+        "ar": "🎙️ أرسل رسالة صوتية أو مقطع فيديو لتحويله إلى نص.",
+        "en": "🎙️ Send a voice message, video, or audio file to transcribe it.",
+        "fr": "🎙️ Envoyez un message vocal ou une vidéo pour le transcrire.",
+        "tr": "🎙️ Sesli mesaj veya video gönderin, metne dönüştüreyim.",
+    },
+    "tr_transcribing": {
+        "ar": "🎙️ جارٍ النسخ...", "en": "🎙️ Transcribing...",
+        "fr": "🎙️ Transcription en cours...", "tr": "🎙️ Yazıya dökülüyor...",
+    },
+    "tr_summarizing": {
+        "ar": "⏳ جارٍ التلخيص...", "en": "⏳ Summarizing...",
+        "fr": "⏳ Résumé en cours...", "tr": "⏳ Özetleniyor...",
+    },
+    "tr_no_speech": {
+        "ar": "❌ لم يُتعرَّف على أي كلام.", "en": "❌ No speech detected in the file.",
+        "fr": "❌ Aucune parole détectée.", "tr": "❌ Konuşma algılanamadı.",
+    },
+    "tr_no_key": {
+        "ar": "❌ مفتاح Groq غير مُهيَّأ.", "en": "❌ Groq API key is not configured.",
+        "fr": "❌ Clé Groq non configurée.", "tr": "❌ Groq API anahtarı yapılandırılmamış.",
+    },
+    "tr_no_ffmpeg": {
+        "ar": "⚠️ تعذّر استخراج الصوت. أرسل ملف صوت مباشرةً.",
+        "en": "⚠️ Could not extract audio. Please send an audio file directly.",
+        "fr": "⚠️ Extraction audio impossible. Envoyez un fichier audio directement.",
+        "tr": "⚠️ Ses çıkarılamadı. Lütfen doğrudan ses dosyası gönderin.",
     },
 }
 
@@ -6823,6 +6884,8 @@ from handlers.fuel import register_fuel_handlers
 from handlers.weather import register_weather_handlers
 from handlers.football import register_football_handlers
 from handlers.movies import register_movies_handlers
+from handlers.downloader import register_downloader_handlers
+from handlers.transcriber import register_transcriber_handlers
 
 from handlers.ai_chat import register_ai_handlers
 from handlers.stocks import register_stocks_handlers
@@ -6841,6 +6904,9 @@ def register_all_handlers(dp):
     register_weather_handlers(dp)
     register_football_handlers(dp)
     register_movies_handlers(dp)
+    # Downloader and Transcriber must come before the AI catch-all
+    register_downloader_handlers(dp)
+    register_transcriber_handlers(dp)
 
     register_ai_handlers(dp)
     register_stocks_handlers(dp)
@@ -6875,12 +6941,14 @@ _KB_AR = [
     ["⛽ محروقات",  "🌤 طقس",      "🥇 ذهب"],
     ["💱 عملة",     "⚽ كرة قدم",  "🎬 أفلام"],
     ["🤖 ذكاء اصطناعي", "✈️ رحلات", "🌍 زلازل"],
+    ["📥 تحميل",   "🎙️ نسخ صوتي"],
     ["⚙️ إعدادات"],
 ]
 _KB_EN = [
     ["⛽ Fuel",     "🌤 Weather",  "🥇 Gold"],
     ["💱 Currency", "⚽ Football", "🎬 Movies"],
     ["🤖 AI Chat",  "✈️ Flights",  "🌍 Quakes"],
+    ["📥 Downloader", "🎙️ Transcriber"],
     ["⚙️ Settings"],
 ]
 
@@ -6897,16 +6965,18 @@ for _row in _KB_EN:
 
 # Extra exact mappings for ambiguous labels
 _BTN_MAP.update({
-    "⛽ محروقات": "fuel",    "⛽ Fuel": "fuel",
-    "🌤 طقس": "weather",     "🌤 Weather": "weather",
-    "🥇 ذهب": "gold",        "🥇 Gold": "gold",
-    "💱 عملة": "currency",   "💱 Currency": "currency",
-    "⚽ كرة قدم": "football","⚽ Football": "football",
-    "🎬 أفلام": "movies",    "🎬 Movies": "movies",
-    "🤖 ذكاء اصطناعي": "ai","🤖 AI Chat": "ai",
-    "✈️ رحلات": "flights",  "✈️ Flights": "flights",
-    "🌍 زلازل": "quakes",   "🌍 Quakes": "quakes",
-    "⚙️ إعدادات": "settings","⚙️ Settings": "settings",
+    "⛽ محروقات": "fuel",        "⛽ Fuel": "fuel",
+    "🌤 طقس": "weather",         "🌤 Weather": "weather",
+    "🥇 ذهب": "gold",            "🥇 Gold": "gold",
+    "💱 عملة": "currency",       "💱 Currency": "currency",
+    "⚽ كرة قدم": "football",    "⚽ Football": "football",
+    "🎬 أفلام": "movies",        "🎬 Movies": "movies",
+    "🤖 ذكاء اصطناعي": "ai",    "🤖 AI Chat": "ai",
+    "✈️ رحلات": "flights",      "✈️ Flights": "flights",
+    "🌍 زلازل": "quakes",       "🌍 Quakes": "quakes",
+    "📥 تحميل": "downloader",   "📥 Downloader": "downloader",
+    "🎙️ نسخ صوتي": "transcriber", "🎙️ Transcriber": "transcriber",
+    "⚙️ إعدادات": "settings",   "⚙️ Settings": "settings",
 })
 
 
@@ -6971,6 +7041,12 @@ async def _dispatch_key(message: Message, key: str, lang: str) -> None:
                 e = "🟥" if mag >= 6 else ("🟧" if mag >= 5 else "🟨")
                 lines.append(f"{e} M{mag:.1f} — {place}")
             await message.answer("\n".join(lines), parse_mode="Markdown")
+        elif key == "downloader":
+            from handlers.downloader import cmd_download
+            await cmd_download(message, lang=lang)
+        elif key == "transcriber":
+            from handlers.transcriber import cmd_transcribe
+            await cmd_transcribe(message, lang=lang)
         elif key == "settings":
             from handlers.settings import cmd_settings
             await cmd_settings(message, lang=lang)
@@ -9175,6 +9251,400 @@ async def handle_lang_change(callback: CallbackQuery, lang: str = "en") -> None:
 
 
 def register_settings_handlers(dp) -> None:
+    dp.include_router(router)
+'''
+
+FILES["handlers/downloader.py"] = r'''
+import logging
+import os
+import asyncio
+import tempfile
+import time
+import shutil
+from pathlib import Path
+from typing import Optional
+
+from aiogram import Router, F
+from aiogram.types import (
+    Message, CallbackQuery,
+    InlineKeyboardMarkup, InlineKeyboardButton,
+    FSInputFile,
+)
+from aiogram.filters import Command
+
+from config import t
+
+logger = logging.getLogger(__name__)
+router = Router(name="downloader")
+
+MAX_BYTES = 50 * 1024 * 1024  # 50 MB Telegram bot limit
+
+_SUPPORTED_DOMAINS = (
+    "youtube.com", "youtu.be",
+    "tiktok.com", "vm.tiktok.com",
+    "instagram.com", "instagr.am",
+    "twitter.com", "x.com",
+    "facebook.com", "fb.watch",
+    "vimeo.com",
+    "reddit.com", "v.redd.it",
+)
+
+_pending_urls: dict[int, str] = {}
+
+
+def _is_media_url(text: str) -> bool:
+    text = (text or "").strip().lower()
+    return text.startswith("http") and any(d in text for d in _SUPPORTED_DOMAINS)
+
+
+def _format_kb(lang: str) -> InlineKeyboardMarkup:
+    if lang == "ar":
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="📹 جودة عالية", callback_data="dl:high"),
+                InlineKeyboardButton(text="📱 جودة منخفضة", callback_data="dl:low"),
+            ],
+            [InlineKeyboardButton(text="🎵 صوت MP3", callback_data="dl:mp3")],
+        ])
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="📹 High Quality", callback_data="dl:high"),
+            InlineKeyboardButton(text="📱 Low Quality", callback_data="dl:low"),
+        ],
+        [InlineKeyboardButton(text="🎵 Audio MP3", callback_data="dl:mp3")],
+    ])
+
+
+def _build_ydl_opts(fmt: str, tmp_dir: str) -> dict:
+    base = {
+        "outtmpl": f"{tmp_dir}/%(title).80s.%(ext)s",
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+        "max_filesize": MAX_BYTES,
+        "http_headers": {"User-Agent": "Mozilla/5.0"},
+    }
+    if fmt == "mp3":
+        base.update({
+            "format": "bestaudio/best",
+            "postprocessors": [{
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "192",
+            }],
+        })
+    elif fmt == "low":
+        base["format"] = "bestvideo[height<=480]+bestaudio/best[height<=480]/worst[ext=mp4]/worst"
+    else:
+        base["format"] = "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best[ext=mp4]/best"
+    return base
+
+
+def _find_output(tmp_dir: str) -> Optional[str]:
+    candidates = sorted(Path(tmp_dir).iterdir(), key=lambda p: p.stat().st_size, reverse=True)
+    return str(candidates[0]) if candidates else None
+
+
+@router.message(Command("download"))
+async def cmd_download(message: Message, lang: str = "en") -> None:
+    hint = (
+        "📥 أرسل رابطاً من يوتيوب أو تيك توك أو إنستغرام..."
+        if lang == "ar"
+        else "📥 Send a YouTube, TikTok, or Instagram link to download it."
+    )
+    await message.answer(hint)
+
+
+@router.message(F.text.func(_is_media_url))
+async def handle_media_url(message: Message, lang: str = "en") -> None:
+    url = (message.text or "").strip()
+    _pending_urls[message.from_user.id] = url
+    prompt = "🎬 اختر صيغة التحميل:" if lang == "ar" else "🎬 Choose download format:"
+    await message.answer(prompt, reply_markup=_format_kb(lang))
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("dl:"))
+async def handle_dl_cb(callback: CallbackQuery, lang: str = "en") -> None:
+    await callback.answer()
+    user_id = callback.from_user.id
+    url = _pending_urls.get(user_id)
+    if not url:
+        no_url = (
+            "❌ لم يُعثر على رابط. أرسل الرابط مجدداً."
+            if lang == "ar"
+            else "❌ No URL found. Please send the link again."
+        )
+        await callback.message.answer(no_url)
+        return
+
+    fmt = callback.data.split(":")[1]
+    status_msg = await callback.message.answer(
+        "⏳ جارٍ التحميل..." if lang == "ar" else "⏳ Downloading..."
+    )
+    tmp_dir = tempfile.mkdtemp(prefix="vx_dl_")
+
+    try:
+        import yt_dlp
+
+        ydl_opts = _build_ydl_opts(fmt, tmp_dir)
+        loop = asyncio.get_event_loop()
+        last_update = [time.monotonic()]
+
+        def _progress_hook(d: dict) -> None:
+            if d.get("status") != "downloading":
+                return
+            now = time.monotonic()
+            if now - last_update[0] < 4:
+                return
+            last_update[0] = now
+            pct = d.get("_percent_str", "?%").strip()
+            spd = d.get("_speed_str", "").strip()
+            text = (
+                f"⏳ جارٍ التحميل: {pct}  {spd}"
+                if lang == "ar"
+                else f"⏳ Downloading: {pct}  {spd}"
+            )
+            asyncio.run_coroutine_threadsafe(status_msg.edit_text(text), loop)
+
+        ydl_opts["progress_hooks"] = [_progress_hook]
+
+        def _do_download() -> None:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
+
+        await loop.run_in_executor(None, _do_download)
+
+        found = _find_output(tmp_dir)
+        if not found:
+            raise FileNotFoundError("yt-dlp produced no output file")
+
+        size = os.path.getsize(found)
+        if size > MAX_BYTES:
+            mb = size // (1024 * 1024)
+            over = (
+                f"⚠️ حجم الملف {mb}MB يتجاوز الحد (50MB). جرّب صيغة MP3."
+                if lang == "ar"
+                else f"⚠️ File is {mb}MB — exceeds the 50MB limit. Try Audio MP3."
+            )
+            await status_msg.edit_text(over)
+            return
+
+        await status_msg.edit_text("📤 جارٍ الإرسال..." if lang == "ar" else "📤 Sending...")
+        file_obj = FSInputFile(found)
+        if fmt == "mp3":
+            await callback.message.answer_audio(file_obj)
+        else:
+            try:
+                await callback.message.answer_video(file_obj)
+            except Exception:
+                await callback.message.answer_document(file_obj)
+
+        await status_msg.delete()
+        _pending_urls.pop(user_id, None)
+
+    except Exception as exc:
+        logger.error(f"Download error for {url!r}: {exc}", exc_info=True)
+        err = (
+            f"❌ فشل التحميل: {type(exc).__name__}"
+            if lang == "ar"
+            else f"❌ Download failed: {type(exc).__name__}"
+        )
+        try:
+            await status_msg.edit_text(err)
+        except Exception:
+            pass
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def register_downloader_handlers(dp) -> None:
+    dp.include_router(router)
+'''
+
+FILES["handlers/transcriber.py"] = r'''
+import logging
+import os
+import asyncio
+import tempfile
+import shutil
+import subprocess
+from typing import Optional
+
+import httpx
+from aiogram import Router, F
+from aiogram.types import Message
+from aiogram.filters import Command
+
+from config import t, settings
+
+logger = logging.getLogger(__name__)
+router = Router(name="transcriber")
+
+_GROQ_STT_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
+_GROQ_MODEL = "whisper-large-v3"
+_GEMINI_URL = (
+    "https://generativelanguage.googleapis.com/v1beta/models"
+    "/gemini-2.0-flash:generateContent"
+)
+_SUMMARY_THRESHOLD = 500
+
+
+async def _transcribe(audio_path: str) -> str:
+    async with httpx.AsyncClient(timeout=120) as client:
+        with open(audio_path, "rb") as fh:
+            resp = await client.post(
+                _GROQ_STT_URL,
+                headers={"Authorization": f"Bearer {settings.groq_api_key}"},
+                files={"file": (os.path.basename(audio_path), fh, "audio/ogg")},
+                data={"model": _GROQ_MODEL, "response_format": "text"},
+            )
+        resp.raise_for_status()
+        return resp.text.strip()
+
+
+async def _summarize(text: str, lang: str) -> Optional[str]:
+    if not settings.gemini_api_key:
+        return None
+    prompt = (
+        f"لخّص النص التالي في 3 نقاط رئيسية موجزة:\n\n{text}"
+        if lang == "ar"
+        else f"Summarize the following text in exactly 3 concise bullet points:\n\n{text}"
+    )
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(
+                f"{_GEMINI_URL}?key={settings.gemini_api_key}",
+                json={"contents": [{"parts": [{"text": prompt}]}]},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            parts = (
+                data.get("candidates", [{}])[0]
+                .get("content", {})
+                .get("parts", [{}])
+            )
+            return (parts[0].get("text") or "").strip() or None
+    except Exception as exc:
+        logger.warning(f"Gemini summary failed: {exc}")
+        return None
+
+
+def _extract_audio(input_path: str, output_path: str) -> bool:
+    try:
+        result = subprocess.run(
+            [
+                "ffmpeg", "-i", input_path,
+                "-vn", "-ar", "16000", "-ac", "1", "-ab", "128k",
+                "-f", "mp3", output_path, "-y",
+            ],
+            capture_output=True,
+            timeout=120,
+        )
+        return result.returncode == 0 and os.path.exists(output_path)
+    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+        logger.warning(f"ffmpeg unavailable: {exc}")
+        return False
+
+
+async def _process(message: Message, file_id: str, ext: str, lang: str) -> None:
+    wait_msg = await message.answer(
+        "🎙️ جارٍ النسخ..." if lang == "ar" else "🎙️ Transcribing..."
+    )
+    tmp_dir = tempfile.mkdtemp(prefix="vx_tr_")
+    try:
+        if not settings.groq_api_key:
+            await wait_msg.edit_text(
+                "❌ مفتاح Groq غير مُهيَّأ." if lang == "ar"
+                else "❌ Groq API key is not configured."
+            )
+            return
+
+        audio_path = os.path.join(tmp_dir, f"input.{ext}")
+        await message.bot.download(file_id, destination=audio_path)
+
+        if ext in ("mp4", "webm", "avi", "mov", "mkv"):
+            extracted = os.path.join(tmp_dir, "audio.mp3")
+            ok = await asyncio.get_event_loop().run_in_executor(
+                None, _extract_audio, audio_path, extracted
+            )
+            if ok:
+                audio_path = extracted
+            else:
+                await wait_msg.edit_text(
+                    "⚠️ تعذّر استخراج الصوت. أرسل ملف صوت مباشرةً."
+                    if lang == "ar"
+                    else "⚠️ Could not extract audio. Please send an audio file directly."
+                )
+                return
+
+        text = await _transcribe(audio_path)
+        if not text:
+            await wait_msg.edit_text(
+                "❌ لم يُتعرَّف على أي كلام." if lang == "ar"
+                else "❌ No speech detected in the file."
+            )
+            return
+
+        header = "🎙️ *النص المستخرج:*\n\n" if lang == "ar" else "🎙️ *Transcription:*\n\n"
+        body = text if len(text) <= 3800 else text[:3800] + "…"
+        await wait_msg.edit_text(header + body, parse_mode="Markdown")
+
+        if len(text) > _SUMMARY_THRESHOLD:
+            await message.answer("⏳ جارٍ التلخيص..." if lang == "ar" else "⏳ Summarizing...")
+            summary = await _summarize(text, lang)
+            if summary:
+                sum_header = "📝 *الملخص:*\n\n" if lang == "ar" else "📝 *Summary:*\n\n"
+                await message.answer(sum_header + summary, parse_mode="Markdown")
+
+    except Exception as exc:
+        logger.error(f"Transcription error: {exc}", exc_info=True)
+        err = (
+            f"❌ فشل النسخ: {type(exc).__name__}"
+            if lang == "ar"
+            else f"❌ Transcription failed: {type(exc).__name__}"
+        )
+        try:
+            await wait_msg.edit_text(err)
+        except Exception:
+            pass
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+@router.message(Command("transcribe"))
+async def cmd_transcribe(message: Message, lang: str = "en") -> None:
+    hint = (
+        "🎙️ أرسل رسالة صوتية أو مقطع فيديو لتحويله إلى نص."
+        if lang == "ar"
+        else "🎙️ Send a voice message, video, or audio file to transcribe it."
+    )
+    await message.answer(hint)
+
+
+@router.message(F.voice)
+async def handle_voice(message: Message, lang: str = "en") -> None:
+    await _process(message, message.voice.file_id, "ogg", lang)
+
+
+@router.message(F.video_note)
+async def handle_video_note(message: Message, lang: str = "en") -> None:
+    await _process(message, message.video_note.file_id, "mp4", lang)
+
+
+@router.message(F.video)
+async def handle_video(message: Message, lang: str = "en") -> None:
+    await _process(message, message.video.file_id, "mp4", lang)
+
+
+@router.message(F.audio)
+async def handle_audio_file(message: Message, lang: str = "en") -> None:
+    ext = "mp3"
+    if message.audio.file_name:
+        ext = message.audio.file_name.rsplit(".", 1)[-1].lower() or "mp3"
+    await _process(message, message.audio.file_id, ext, lang)
+
+
+def register_transcriber_handlers(dp) -> None:
     dp.include_router(router)
 '''
 
