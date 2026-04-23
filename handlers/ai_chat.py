@@ -1,3 +1,5 @@
+import base64
+import io
 import logging
 import re
 import time
@@ -5,6 +7,8 @@ import urllib.parse
 from datetime import datetime, timezone
 from typing import Optional
 from collections import defaultdict
+
+import httpx
 
 # ── Download-intent detection ───────────────────────────────────
 _DL_KW = {"download", "تحميل", "نزل", "حمل", "حمّل", "تنزيل", "دانلود"}
@@ -21,7 +25,7 @@ def _extract_media_url(text: str) -> Optional[str]:
         return None
     url = m.group(0).rstrip(".,;)")
     return url if any(d in url.lower() for d in _DL_DOMAINS) else None
-from aiogram import Router
+from aiogram import Router, F
 from aiogram.types import Message
 from aiogram.filters import Command
 
@@ -32,7 +36,7 @@ from services.omega_judge import omega_judge
 from services.omega_memory import omega_memory
 from services.rate_limiter import check_user_rate
 from services.web_search import web_search, needs_web_search
-from config import t
+from config import settings, t
 from database.connection import get_session
 from database.crud import CRUDManager
 
@@ -455,6 +459,88 @@ async def process_ai_query(message: Message, query: str, lang: str = "en") -> No
     except Exception as exc:
         logger.error(f"AI chat error: {exc}", exc_info=True)
         await message.answer(t("error", lang))
+
+
+@router.message(F.photo)
+async def handle_photo_message(message: Message, lang: str = "en") -> None:
+    """Analyze image using Gemini vision (multimodal)."""
+    caption = (message.caption or "").strip()
+    if not caption:
+        caption = (
+            "صف ما تراه في هذه الصورة بالتفصيل"
+            if lang == "ar"
+            else "Describe what you see in this image in detail."
+        )
+
+    if not check_user_rate(message.from_user.id, "ai_chat"):
+        await message.answer(t("rate_limited", lang))
+        return
+
+    api_key = settings.gemini_api_key
+    if not api_key:
+        await message.answer(
+            "❌ تحليل الصور غير مفعّل حالياً."
+            if lang == "ar"
+            else "❌ Image analysis is not available right now."
+        )
+        return
+
+    status = await message.answer(
+        "🔍 جارٍ تحليل الصورة..." if lang == "ar" else "🔍 Analyzing image..."
+    )
+
+    try:
+        photo = message.photo[-1]
+        file = await message.bot.get_file(photo.file_id)
+        bio = io.BytesIO()
+        await message.bot.download_file(file.file_path, destination=bio)
+        bio.seek(0)
+        img_b64 = base64.b64encode(bio.read()).decode()
+
+        system_text = SYSTEM_PROMPT + f"\n\n{_current_date_block()}"
+        url = (
+            "https://generativelanguage.googleapis.com/v1beta/models/"
+            f"gemini-2.0-flash:generateContent?key={api_key}"
+        )
+        payload = {
+            "contents": [{
+                "parts": [
+                    {"inline_data": {"mime_type": "image/jpeg", "data": img_b64}},
+                    {"text": f"System: {system_text}\n\nUser: {caption}"},
+                ]
+            }],
+            "generationConfig": {"maxOutputTokens": 1024, "temperature": 0.7},
+        }
+
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(url, json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+
+        text = data["candidates"][0]["content"]["parts"][0]["text"]
+        if len(text) > 4000:
+            text = text[:4000] + "..."
+
+        await status.delete()
+        try:
+            await message.answer(text, parse_mode="Markdown")
+        except Exception:
+            await message.answer(text)
+
+        uid = message.from_user.id
+        _history_add(uid, "user", f"[image] {caption}")
+        _history_add(uid, "assistant", text[:300])
+
+    except Exception as exc:
+        logger.error(f"Vision error: {exc}", exc_info=True)
+        try:
+            await status.edit_text(
+                "⚠️ تعذّر تحليل الصورة، حاول لاحقاً."
+                if lang == "ar"
+                else "⚠️ Could not analyze the image. Please try again."
+            )
+        except Exception:
+            pass
 
 
 def register_ai_handlers(dp) -> None:

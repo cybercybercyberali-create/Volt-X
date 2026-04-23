@@ -12,7 +12,7 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
-# Keywords that flag a query as time-sensitive → needs web search
+# Keywords that flag a query as needing a web search
 _SEARCH_TRIGGERS = {
     # Arabic — temporal
     "اليوم", "الآن", "الان", "حالياً", "حاليا", "آخر", "اخر", "أحدث", "احدث",
@@ -25,9 +25,17 @@ _SEARCH_TRIGGERS = {
     "this week", "this month", "this year",
     # English — current-events / news
     "news", "happened", "breaking",
-    # Years → anything past training cutoff
-    "2024", "2025", "2026", "2027",
-    "٢٠٢٤", "٢٠٢٥", "٢٠٢٦", "٢٠٢٧",
+    # Years (2023 late events may not be in training data)
+    "2023", "2024", "2025", "2026", "2027",
+    "٢٠٢٣", "٢٠٢٤", "٢٠٢٥", "٢٠٢٦", "٢٠٢٧",
+    # Entertainment — movies/shows often reference releases unknown to models
+    "فيلم", "مسلسل", "موسم", "حلقة", "movie", "film", "series", "show", "episode",
+    "لعبة", "game", "anime", "انمي", "أغنية", "اغنية", "album", "ألبوم",
+    # Major franchises with frequent new installments
+    "avengers", "marvel", "batman", "spider-man", "spiderman",
+    "disney", "ديزني", "netflix", "نتفليكس",
+    # Arabic entity-lookup patterns ("what/who is X")
+    "من هو", "من هي", "ما هو", "ما هي", "شو هو", "شو هي",
 }
 
 
