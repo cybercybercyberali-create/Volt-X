@@ -154,14 +154,14 @@ class OmegaFuel:
             # Scraping failed — store hardcoded fallback so cache is always populated
             from datetime import date as _d, timedelta as _td
             _today = _d.today()
-            _last_thu = _today - _td(days=(_today.weekday() - 3) % 7)
+            _last_mon = _today - _td(days=(_today.weekday()) % 7)
             result["prices"] = {
-                "بنزين 98": "2,431,000 ل.ل.",
-                "بنزين 95": "2,390,000 ل.ل.",
-                "ديزل":     "2,497,000 ل.ل.",
-                "غاز 10kg": "1,751,000 ل.ل.",
+                "بنزين 98": "2,423,000 ل.ل.",
+                "بنزين 95": "2,382,000 ل.ل.",
+                "ديزل":     "2,466,000 ل.ل.",
+                "غاز 10kg": "1,706,000 ل.ل.",
             }
-            result["published_date"] = f"{_last_thu.day}/{_last_thu.month}/{_last_thu.year}"
+            result["published_date"] = f"{_last_mon.day}/{_last_mon.month}/{_last_mon.year}"
             result["scraped_at"]     = datetime.now(timezone.utc).isoformat()
             result["stale"]          = True
             return result
@@ -296,10 +296,12 @@ class OmegaFuel:
                 if not html or len(html) < 500:
                     continue
 
-                # Many React/Next.js sites embed initial state in <script> tags
-                # Look for JSON data like {"fuelPrices":[...]} or window.__NEXT_DATA__
+                # Next.js embeds server-side props in <script id="__NEXT_DATA__">
                 json_match = re.search(
-                    r'(?:__NEXT_DATA__|__NUXT__|window\.__data__|initialState)\s*[=:]\s*(\{.{20,})',
+                    r'<script[^>]+id=["\']__NEXT_DATA__["\'][^>]*>\s*(\{.+?)\s*</script>',
+                    html, re.DOTALL
+                ) or re.search(
+                    r'(?:__NUXT__|window\.__data__|initialState)\s*[=:]\s*(\{.{20,})',
                     html, re.DOTALL
                 )
                 if json_match:
