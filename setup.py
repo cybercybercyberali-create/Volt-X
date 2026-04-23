@@ -9468,16 +9468,18 @@ def register_settings_handlers(dp) -> None:
 '''
 
 FILES["handlers/downloader.py"] = r'''
+import os
 import re
 import logging
 import asyncio
+import tempfile
 from typing import Optional
 
 import httpx
 from aiogram import Router, F
 from aiogram.types import (
     Message, CallbackQuery,
-    InlineKeyboardMarkup, InlineKeyboardButton,
+    InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile,
 )
 from aiogram.filters import Command
 
@@ -9498,6 +9500,8 @@ _SUPPORTED_DOMAINS = (
 _YT_DOMAINS = ("youtube.com", "youtu.be")
 _TT_DOMAINS = ("tiktok.com", "vm.tiktok.com", "vt.tiktok.com")
 _YT_ID_RE = re.compile(r'(?:v=|youtu\.be/|/shorts/|embed/)([A-Za-z0-9_-]{11})')
+
+_MAX_TG_BYTES = 50 * 1024 * 1024  # 50 MB Telegram upload limit
 
 # user_id → URL awaiting format selection
 _pending_urls: dict[int, str] = {}
@@ -9547,8 +9551,102 @@ def _fmt_duration(secs: int) -> str:
     return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
 
 
+# ─── Cobalt API ────────────────────────────────────────────────────────────────
+
+async def _cobalt_get_link(url: str, fmt: str) -> Optional[dict]:
+    """POST to cobalt.tools v10, return {url, filename} or None."""
+    body = {
+        "url": url,
+        "videoQuality": "720" if fmt != "mp3" else "480",
+        "downloadMode": "audio" if fmt == "mp3" else "auto",
+        "audioFormat": "mp3",
+        "filenameStyle": "nerdy",
+        "alwaysProxy": True,
+    }
+    async with httpx.AsyncClient(timeout=30) as client:
+        try:
+            resp = await client.post(
+                "https://api.cobalt.tools/",
+                json=body,
+                headers={"Accept": "application/json", "Content-Type": "application/json"},
+            )
+        except Exception as exc:
+            logger.warning(f"Cobalt request error: {exc}")
+            return None
+
+        if resp.status_code >= 400:
+            logger.warning(f"Cobalt HTTP {resp.status_code}: {resp.text[:200]}")
+            return None
+        data = resp.json()
+
+    status = data.get("status")
+    if status in ("stream", "tunnel", "redirect", "local-processing"):
+        return {"url": data.get("url"), "filename": data.get("filename") or "media"}
+    if status == "picker":
+        items = data.get("picker") or []
+        if items:
+            return {"url": items[0].get("url"), "filename": "media"}
+    if status == "error":
+        err = (data.get("error") or {}).get("code", "unknown")
+        logger.warning(f"Cobalt error for {url!r}: {err}")
+    return None
+
+
+# ─── Stream download to /tmp ───────────────────────────────────────────────────
+
+async def _stream_to_tmp(dl_url: str) -> Optional[str]:
+    """Download URL to a /tmp file, abort if > 50 MB. Returns path or None."""
+    fd, path = tempfile.mkstemp(prefix="voltx_dl_", dir="/tmp")
+    os.close(fd)
+    written = 0
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(60.0, connect=10.0),
+            follow_redirects=True,
+        ) as client:
+            async with client.stream(
+                "GET", dl_url,
+                headers={"User-Agent": "Mozilla/5.0"},
+            ) as resp:
+                if resp.status_code >= 400:
+                    os.unlink(path)
+                    return None
+                cl = resp.headers.get("content-length")
+                if cl and int(cl) > _MAX_TG_BYTES:
+                    os.unlink(path)
+                    return None
+                with open(path, "wb") as f:
+                    async for chunk in resp.aiter_bytes(chunk_size=65536):
+                        written += len(chunk)
+                        if written > _MAX_TG_BYTES:
+                            f.close()
+                            os.unlink(path)
+                            return None
+                        f.write(chunk)
+        return path
+    except Exception as exc:
+        logger.warning(f"Stream download error: {exc}")
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        return None
+
+
+# ─── Send downloaded file via Telegram ────────────────────────────────────────
+
+async def _send_media_file(message: Message, path: str, filename: str, fmt: str) -> None:
+    fs = FSInputFile(path, filename=filename)
+    if fmt == "mp3":
+        await message.answer_audio(audio=fs, title=filename[:64])
+    else:
+        await message.answer_video(video=fs, supports_streaming=True)
+
+
+# ─── URL-mode fallbacks ────────────────────────────────────────────────────────
+
 async def _tikwm_get_url(url: str, fmt: str) -> Optional[str]:
-    """TikWM API — returns tikwm.com-hosted URLs, not IP-bound TikTok CDN."""
+    """TikWM API — tikwm.com-hosted URLs, never IP-bound TikTok CDN."""
     async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.get(
             "https://www.tikwm.com/api/",
@@ -9556,14 +9654,11 @@ async def _tikwm_get_url(url: str, fmt: str) -> Optional[str]:
             headers={"User-Agent": "Mozilla/5.0"},
         )
         if resp.status_code >= 400:
-            logger.warning(f"TikWM HTTP {resp.status_code}")
             return None
         data = resp.json()
 
     if data.get("code") != 0:
-        logger.warning(f"TikWM error: {data.get('msg')}")
         return None
-
     d = data.get("data", {})
     if fmt == "mp3":
         return d.get("music")
@@ -9572,41 +9667,8 @@ async def _tikwm_get_url(url: str, fmt: str) -> Optional[str]:
     return d.get("hdplay") or d.get("play")
 
 
-async def _cobalt_get_url(url: str, fmt: str) -> Optional[str]:
-    """Get direct download link from cobalt.tools."""
-    body = {
-        "url": url,
-        "videoQuality": "1080" if fmt == "high" else "480",
-        "downloadMode": "audio" if fmt == "mp3" else "auto",
-        "audioFormat": "mp3",
-        "alwaysProxy": True,
-        "filenameStyle": "basic",
-    }
-    async with httpx.AsyncClient(timeout=20) as client:
-        resp = await client.post(
-            "https://api.cobalt.tools/",
-            json=body,
-            headers={"Content-Type": "application/json", "Accept": "application/json"},
-        )
-        if resp.status_code >= 400:
-            logger.warning(f"Cobalt HTTP {resp.status_code}: {resp.text[:200]}")
-            return None
-        data = resp.json()
-
-    status = data.get("status")
-    if status in ("redirect", "tunnel", "stream", "local-processing"):
-        return data.get("url")
-    if status == "picker":
-        items = data.get("picker") or []
-        return items[0].get("url") if items else None
-    if status == "error":
-        err = (data.get("error") or {}).get("code", "unknown")
-        logger.warning(f"Cobalt error for {url!r}: {err}")
-    return None
-
-
 async def _piped_get_url(url: str, fmt: str) -> Optional[str]:
-    """Piped API — YouTube streams proxied through piped.video CDN, not IP-bound."""
+    """Piped API — YouTube streams proxied, not IP-bound."""
     vid_id = _extract_yt_id(url)
     if not vid_id:
         return None
@@ -9617,7 +9679,6 @@ async def _piped_get_url(url: str, fmt: str) -> Optional[str]:
             headers={"User-Agent": "Mozilla/5.0"},
         )
         if resp.status_code >= 400:
-            logger.warning(f"Piped HTTP {resp.status_code}")
             return None
         data = resp.json()
 
@@ -9628,7 +9689,6 @@ async def _piped_get_url(url: str, fmt: str) -> Optional[str]:
         )
         return streams[0].get("url") if streams else None
 
-    # Prefer combined video+audio streams (YouTube caps at 360p for these)
     streams = [s for s in (data.get("videoStreams") or []) if not s.get("videoOnly")]
     if not streams:
         streams = data.get("videoStreams") or []
@@ -9658,7 +9718,7 @@ def _extract_direct_url(url: str, fmt: str) -> dict:
     elif fmt == "low":
         opts["format"] = "bestvideo[height<=480]+bestaudio/best[height<=480]/worst"
     else:
-        opts["format"] = "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"
+        opts["format"] = "bestvideo[height<=720]+bestaudio/best[height<=720]/best"
 
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=False)
@@ -9695,6 +9755,8 @@ def _build_link_reply(title: str, dur: str, direct: str, lang: str) -> str:
     )
 
 
+# ─── Handlers ─────────────────────────────────────────────────────────────────
+
 @router.message(Command("download"))
 async def cmd_download(message: Message, lang: str = "en") -> None:
     hint = (
@@ -9728,76 +9790,99 @@ async def handle_dl_cb(callback: CallbackQuery, lang: str = "en") -> None:
 
     fmt = callback.data.split(":")[1]  # high / low / mp3
     status_msg = await callback.message.answer(
-        "⏳ جارٍ استخراج الرابط..." if lang == "ar" else "⏳ Extracting link..."
+        "⏳ جارٍ معالجة الرابط..." if lang == "ar" else "⏳ Processing your link..."
     )
+    _pending_urls.pop(user_id, None)
 
+    tmp_path: Optional[str] = None
     try:
-        direct = None
-        title = ""
-        dur = ""
-
-        # ── 1. TikTok → TikWM (tikwm.com URLs, never IP-bound) ──────────
+        # ── 1. cobalt.tools → stream-download → send file ──────────────────
+        cobalt_link = None
         if _is_tiktok(url):
+            # TikWM first for TikTok (returns stable tikwm.com URLs)
             try:
-                direct = await _tikwm_get_url(url, fmt)
+                tik_url = await _tikwm_get_url(url, fmt)
+                if tik_url:
+                    cobalt_link = {"url": tik_url, "filename": "tiktok_media"}
             except Exception as exc:
-                logger.warning(f"TikWM failed for {url!r}: {exc}")
+                logger.warning(f"TikWM failed: {exc}")
 
-        # ── 2. cobalt.tools (YouTube / Instagram / others) ───────────────
-        if not direct:
+        if not cobalt_link:
             try:
-                direct = await _cobalt_get_url(url, fmt)
+                cobalt_link = await _cobalt_get_link(url, fmt)
             except Exception as exc:
-                logger.warning(f"Cobalt failed for {url!r}: {exc}")
+                logger.warning(f"Cobalt failed: {exc}")
 
-        # ── 3. YouTube → Piped (proxied CDN, works from any IP) ──────────
-        if not direct and _is_youtube(url):
-            try:
-                direct = await _piped_get_url(url, fmt)
-            except Exception as exc:
-                logger.warning(f"Piped failed for {url!r}: {exc}")
+        if cobalt_link and cobalt_link.get("url"):
+            dl_url = cobalt_link["url"]
+            filename = cobalt_link.get("filename") or "media"
 
-        if direct:
-            text = _build_link_reply("", "", direct, lang)
-        else:
-            # ── 4. yt-dlp fallback ────────────────────────────────────────
-            try:
-                loop = asyncio.get_event_loop()
-                data = await loop.run_in_executor(None, _extract_direct_url, url, fmt)
-                direct = data["direct_url"]
-                title = data["title"] or "—"
-                dur = _fmt_duration(data["duration"])
-            except Exception as exc:
-                logger.warning(f"yt-dlp failed for {url!r}: {exc}")
-                direct = None
+            await status_msg.edit_text(
+                "⬇️ جارٍ تحميل الملف..." if lang == "ar" else "⬇️ Downloading file..."
+            )
+            tmp_path = await _stream_to_tmp(dl_url)
 
-            if direct:
-                text = _build_link_reply(title, dur, direct, lang)
-            else:
-                # ── 5. All failed ─────────────────────────────────────────
-                text = (
-                    "⚠️ تعذّر معالجة الرابط تلقائياً.\n"
-                    "جرّب: @SaveVideo_Bot أو savefrom.net"
-                    if lang == "ar"
-                    else
-                    "⚠️ Could not process this link automatically.\n"
-                    "Try: @SaveVideo_Bot or savefrom.net"
+            if tmp_path:
+                await status_msg.edit_text(
+                    "📤 جارٍ الإرسال..." if lang == "ar" else "📤 Sending..."
                 )
+                await _send_media_file(callback.message, tmp_path, filename, fmt)
+                await status_msg.delete()
+                return
+            else:
+                # File > 50 MB or download failed — send URL instead
+                text = _build_link_reply("", "", dl_url, lang)
+                await status_msg.edit_text(text, parse_mode="Markdown")
+                return
 
-        await status_msg.edit_text(text, parse_mode="Markdown")
-        _pending_urls.pop(user_id, None)
+        # ── 2. YouTube → Piped URL fallback ───────────────────────────────
+        if _is_youtube(url):
+            try:
+                piped_url = await _piped_get_url(url, fmt)
+                if piped_url:
+                    text = _build_link_reply("", "", piped_url, lang)
+                    await status_msg.edit_text(text, parse_mode="Markdown")
+                    return
+            except Exception as exc:
+                logger.warning(f"Piped failed: {exc}")
+
+        # ── 3. yt-dlp last-resort URL extraction ──────────────────────────
+        try:
+            loop = asyncio.get_event_loop()
+            data = await loop.run_in_executor(None, _extract_direct_url, url, fmt)
+            direct = data["direct_url"]
+            if direct:
+                title = data.get("title") or ""
+                dur = _fmt_duration(data.get("duration") or 0)
+                text = _build_link_reply(title, dur, direct, lang)
+                await status_msg.edit_text(text, parse_mode="Markdown")
+                return
+        except Exception as exc:
+            logger.warning(f"yt-dlp failed: {exc}")
+
+        # ── 4. All methods failed ─────────────────────────────────────────
+        await status_msg.edit_text(
+            "⚠️ تعذّر معالجة الرابط حالياً. جرّب لاحقاً أو استخدم: @SaveVideo_Bot"
+            if lang == "ar"
+            else "⚠️ Unable to process this link at the moment. Please try again later."
+        )
 
     except Exception as exc:
         logger.error(f"Downloader error for {url!r}: {exc}", exc_info=True)
-        fallback = (
-            f"⚠️ تعذّر معالجة الرابط.\nجرّب: @SaveVideo_Bot أو savefrom.net\n{url}"
-            if lang == "ar"
-            else f"⚠️ Could not process this link.\nTry: @SaveVideo_Bot or savefrom.net\n{url}"
-        )
         try:
-            await status_msg.edit_text(fallback)
+            await status_msg.edit_text(
+                "⚠️ حدث خطأ غير متوقع. جرّب: @SaveVideo_Bot"
+                if lang == "ar"
+                else "⚠️ An unexpected error occurred. Try: @SaveVideo_Bot"
+            )
         except Exception:
             pass
+    finally:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
 
 def register_downloader_handlers(dp) -> None:
