@@ -4426,27 +4426,38 @@ _COUNTRY_NAMES: dict[str, tuple[str, str]] = {
     "TR": ("تركيا",            "Turkey"),
 }
 
+# Static pump prices (USD/L) — April 2026; used when live scraping fails.
 _STATIC_FUEL_PRICES: dict[str, dict] = {
+    # Gulf — government-subsidized diesel
     "SA": {"بنزين 91": "0.208 USD/L", "بنزين 95": "0.240 USD/L", "ديزل": "0.067 USD/L"},
-    "AE": {"بنزين 91 (E-Plus)": "0.720 USD/L", "بنزين 95 (Special)": "0.757 USD/L", "بنزين 98 (Super)": "0.786 USD/L", "ديزل": "0.736 USD/L"},
-    "EG": {"بنزين 92": "0.275 USD/L", "بنزين 95": "0.327 USD/L", "ديزل": "0.168 USD/L"},
+    "AE": {"بنزين 91 (E-Plus)": "0.734 USD/L", "بنزين 95 (Special)": "0.771 USD/L", "بنزين 98 (Super)": "0.802 USD/L", "ديزل": "0.748 USD/L"},
     "KW": {"بنزين 91 (Premium)": "0.197 USD/L", "بنزين 95 (Super)": "0.230 USD/L", "ديزل": "0.197 USD/L"},
     "QA": {"بنزين 91 (Special)": "0.449 USD/L", "بنزين 95 (Premium)": "0.461 USD/L", "ديزل": "0.449 USD/L"},
-    "JO": {"بنزين 90": "1.061 USD/L", "بنزين 95": "1.229 USD/L", "ديزل": "1.272 USD/L"},
+    "BH": {"بنزين 91": "0.316 USD/L", "بنزين 95": "0.343 USD/L", "ديزل": "0.270 USD/L"},
+    "OM": {"بنزين 91": "0.468 USD/L", "بنزين 95": "0.494 USD/L", "ديزل": "0.442 USD/L"},
+    # Levant & North Africa
+    "EG": {"بنزين 92": "0.282 USD/L", "بنزين 95": "0.338 USD/L", "ديزل": "0.175 USD/L"},
+    "JO": {"بنزين 90": "1.078 USD/L", "بنزين 95": "1.250 USD/L", "ديزل": "1.295 USD/L"},
     "IQ": {"بنزين": "0.307 USD/L", "ديزل": "0.230 USD/L"},
+    "SY": {"بنزين": "0.230 USD/L", "ديزل": "0.180 USD/L"},
+    "PS": {"بنزين 95": "1.420 USD/L", "ديزل": "1.380 USD/L"},
     "DZ": {"بنزين": "0.277 USD/L", "ديزل": "0.166 USD/L"},
-    "MA": {"بنزين 95": "1.230 USD/L", "ديزل": "1.010 USD/L"},
-    "TN": {"بنزين 91": "0.820 USD/L", "بنزين 95": "0.899 USD/L", "ديزل": "0.690 USD/L"},
-    "TR": {"بنزين 95": "1.260 USD/L", "ديزل": "1.140 USD/L"},
+    "MA": {"بنزين 95": "1.250 USD/L", "ديزل": "1.030 USD/L"},
+    "TN": {"بنزين 91": "0.830 USD/L", "بنزين 95": "0.910 USD/L", "ديزل": "0.700 USD/L"},
+    "LY": {"بنزين": "0.031 USD/L", "ديزل": "0.021 USD/L"},
+    "SD": {"بنزين": "0.640 USD/L", "ديزل": "0.550 USD/L"},
+    "YE": {"بنزين": "0.530 USD/L", "ديزل": "0.470 USD/L"},
+    # Europe & Global
+    "TR": {"بنزين 95": "1.290 USD/L", "ديزل": "1.170 USD/L"},
     "US": {"Gasoline (Regular)": "0.950 USD/L", "Diesel": "1.000 USD/L"},
-    "DE": {"Super E10 (95)": "1.750 USD/L", "Diesel": "1.600 USD/L"},
-    "FR": {"SP95-E10": "1.700 USD/L", "Diesel": "1.550 USD/L"},
-    "GB": {"Petrol E10": "1.650 USD/L", "Diesel": "1.680 USD/L"},
-    "JP": {"Regular": "1.200 USD/L", "Diesel": "1.150 USD/L"},
-    "IN": {"Petrol": "1.300 USD/L", "Diesel": "1.100 USD/L"},
-    "BR": {"Gasoline": "1.200 USD/L", "Diesel": "1.000 USD/L"},
-    "RU": {"AI-95": "0.620 USD/L", "Diesel": "0.580 USD/L"},
-    "CN": {"No. 92": "1.050 USD/L", "Diesel": "0.990 USD/L"},
+    "DE": {"Super E10 (95)": "1.760 USD/L", "Diesel": "1.620 USD/L"},
+    "FR": {"SP95-E10": "1.710 USD/L", "Diesel": "1.560 USD/L"},
+    "GB": {"Petrol E10": "1.660 USD/L", "Diesel": "1.700 USD/L"},
+    "JP": {"Regular": "1.210 USD/L", "Diesel": "1.160 USD/L"},
+    "IN": {"Petrol": "1.310 USD/L", "Diesel": "1.110 USD/L"},
+    "BR": {"Gasoline": "1.180 USD/L", "Diesel": "0.980 USD/L"},
+    "RU": {"AI-95": "0.630 USD/L", "Diesel": "0.590 USD/L"},
+    "CN": {"No. 92": "1.060 USD/L", "Diesel": "1.000 USD/L"},
 }
 
 ARAB_FUEL_SOURCES = {
@@ -4818,9 +4829,8 @@ class OmegaFuel:
 
     async def _fetch_gpp_all(self) -> dict[str, dict]:
         """
-        Scrape the GlobalPetrolPrices main listing pages (gasoline + diesel)
-        which list ALL countries in one table — far more reliable than per-country pages.
-        Cached 12 hours.
+        Scrape the GlobalPetrolPrices main listing pages (gasoline + diesel).
+        Tries direct fetch first, then ScraperAPI. Cached 12 hours.
         """
         cache_key = "gpp:listing"
         cached = await cache.get(cache_key)
@@ -4832,33 +4842,61 @@ class OmegaFuel:
 
         result: dict[str, dict] = {}
 
-        for fuel_key, url_path in [("gasoline", "gasoline_prices"), ("diesel", "diesel_prices")]:
-            url = f"https://www.globalpetrolprices.com/{url_path}/"
-            try:
-                html = await self._scraper.fetch_html(url, headers=_GPP_BROWSER_HEADERS)
-                if not html or len(html) < 2000:
+        async def _parse_gpp_html(html: str, fuel_key: str) -> None:
+            soup = BeautifulSoup(html, "lxml")
+            for row in soup.find_all("tr"):
+                cells = row.find_all("td")
+                if len(cells) < 2:
                     continue
-                soup = BeautifulSoup(html, "lxml")
-                for row in soup.find_all("tr"):
-                    cells = row.find_all("td")
-                    if len(cells) < 2:
-                        continue
-                    country_text = cells[0].get_text(strip=True)
-                    code = _GPP_NAME_TO_CODE.get(country_text)
-                    if not code:
-                        continue
-                    for cell in cells[1:5]:
-                        txt = cell.get_text(strip=True).replace(",", ".")
-                        m = _re.search(r'\b(\d+\.\d{2,4})\b', txt)
-                        if m:
-                            val = float(m.group(1))
-                            if 0.01 < val < 10.0:
-                                result.setdefault(code, {})
-                                label = "Gasoline" if fuel_key == "gasoline" else "Diesel"
-                                result[code][label] = f"{val:.3f} USD/L"
-                                break
+                country_text = cells[0].get_text(strip=True)
+                code = _GPP_NAME_TO_CODE.get(country_text)
+                if not code:
+                    continue
+                for cell in cells[1:5]:
+                    txt = cell.get_text(strip=True).replace(",", ".")
+                    m = _re.search(r'\b(\d+\.\d{2,4})\b', txt)
+                    if m:
+                        val = float(m.group(1))
+                        if 0.01 < val < 10.0:
+                            result.setdefault(code, {})
+                            label = "Gasoline" if fuel_key == "gasoline" else "Diesel"
+                            result[code][label] = f"{val:.3f} USD/L"
+                            break
+
+        _skey = getattr(settings, "scraper_api_key", "") or ""
+
+        for fuel_key, url_path in [("gasoline", "gasoline_prices"), ("diesel", "diesel_prices")]:
+            gpp_url = f"https://www.globalpetrolprices.com/{url_path}/"
+            html = None
+
+            # Try direct fetch first
+            try:
+                html = await self._scraper.fetch_html(gpp_url, headers=_GPP_BROWSER_HEADERS)
+                if not html or len(html) < 2000:
+                    html = None
             except Exception as exc:
-                logger.debug(f"_fetch_gpp_all {fuel_key}: {exc}")
+                logger.debug(f"GPP direct fetch failed ({fuel_key}): {exc}")
+
+            # Fallback: ScraperAPI (plain HTML — GPP is server-rendered)
+            if not html and _skey:
+                try:
+                    import httpx as _httpx
+                    async with _httpx.AsyncClient(timeout=25.0) as _cl:
+                        _r = await _cl.get(
+                            "https://api.scraperapi.com/",
+                            params={"api_key": _skey, "url": gpp_url, "render": "false"},
+                        )
+                        if _r.status_code == 200 and len(_r.text) > 2000:
+                            html = _r.text
+                            logger.info(f"GPP via ScraperAPI ({fuel_key}): {len(html)} bytes")
+                except Exception as exc:
+                    logger.debug(f"GPP ScraperAPI failed ({fuel_key}): {exc}")
+
+            if html:
+                try:
+                    await _parse_gpp_html(html, fuel_key)
+                except Exception as exc:
+                    logger.debug(f"GPP parse error ({fuel_key}): {exc}")
 
         if result:
             await cache.set(cache_key, result, ttl=3600 * 12)
@@ -7876,7 +7914,14 @@ async def _show_fuel(send_to: Message, country: str, lang: str) -> None:
     # ── Other countries: simple display ──────────────────────────────────
     try:
         if data.get("error"):
-            await send_to.answer(t("error", lang))
+            name = data.get("country_name_ar") or data.get("country_name_en") or country
+            msg = (
+                f"⚠️ تعذّر جلب أسعار الوقود لـ {name}.\n"
+                "البيانات غير متوفرة حالياً — حاول لاحقاً."
+                if lang == "ar"
+                else f"⚠️ Could not fetch fuel prices for {name}.\nData unavailable — try again later."
+            )
+            await send_to.answer(msg)
             return
 
         name = data.get("country_name_ar", data.get("country_name_en", country))

@@ -238,7 +238,14 @@ async def _show_fuel(send_to: Message, country: str, lang: str) -> None:
     # ── Other countries: simple display ──────────────────────────────────
     try:
         if data.get("error"):
-            await send_to.answer(t("error", lang))
+            name = data.get("country_name_ar") or data.get("country_name_en") or country
+            msg = (
+                f"⚠️ تعذّر جلب أسعار الوقود لـ {name}.\n"
+                "البيانات غير متوفرة حالياً — حاول لاحقاً."
+                if lang == "ar"
+                else f"⚠️ Could not fetch fuel prices for {name}.\nData unavailable — try again later."
+            )
+            await send_to.answer(msg)
             return
 
         name = data.get("country_name_ar", data.get("country_name_en", country))
