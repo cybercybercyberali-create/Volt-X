@@ -4658,18 +4658,27 @@ class OmegaFuel:
             "Upgrade-Insecure-Requests": "1",
         }
 
-        # Source 0a: ScraperAPI proxy — bypasses Render IP block (1 credit/call)
+        # Source 0a: ScraperAPI — JS-rendered fetch (IPT is a React SPA)
         _skey = getattr(settings, "scraper_api_key", "") or ""
         if _skey:
             import httpx as _httpx
-            try:
-                async with _httpx.AsyncClient(timeout=15.0) as _cl:
-                    _r = await _cl.get(
-                        "https://api.scraperapi.com/",
-                        params={"api_key": _skey,
-                                "url": "https://www.iptgroup.com.lb/ipt/en/our-stations/fuel-prices"},
-                    )
-                    if _r.status_code == 200 and len(_r.text) > 500:
+            _ipt_url = "https://www.iptgroup.com.lb/ipt/en/our-stations/fuel-prices"
+            # Try JS-rendered first (5 credits), then plain HTML (1 credit) as fallback
+            for _render in ("true", "false"):
+                try:
+                    async with _httpx.AsyncClient(timeout=35.0) as _cl:
+                        _r = await _cl.get(
+                            "https://api.scraperapi.com/",
+                            params={
+                                "api_key": _skey,
+                                "url": _ipt_url,
+                                "render": _render,
+                                "wait": "3000" if _render == "true" else "0",
+                                "country_code": "lb",
+                            },
+                        )
+                        if _r.status_code != 200 or len(_r.text) < 500:
+                            continue
                         _plain = re.sub(r'<[^>]+>', ' ', _r.text)
                         _prices = _extract_llp_prices(_plain)
                         if not _prices:
@@ -4678,10 +4687,11 @@ class OmegaFuel:
                             _pub = _extract_date(_plain)
                             _prices["__scraped_at__"] = _NOW_ISO
                             _prices["__published_date__"] = _pub
-                            logger.info(f"ScraperAPI IPT prices: {_prices}")
+                            logger.info(f"ScraperAPI IPT prices (render={_render}): {_prices}")
                             return _prices
-            except Exception as _exc:
-                logger.debug(f"ScraperAPI IPT error: {_exc}")
+                        logger.debug(f"ScraperAPI render={_render}: found {len(_prices)} prices, retrying")
+                except Exception as _exc:
+                    logger.debug(f"ScraperAPI error (render={_render}): {_exc}")
 
         # Source 0: IPT Group — correct URL + fallbacks
         ipt_urls = [
