@@ -172,6 +172,7 @@ class Settings(BaseSettings):
     goldapi_key: str = Field(default="", alias="GOLDAPI_KEY")
     exchange_rate_key: str = Field(default="", alias="EXCHANGE_RATE_KEY")
     scraper_api_key: str = Field(default="", alias="SCRAPER_API_KEY")
+    eia_api_key: str = Field(default="", alias="EIA_API_KEY")
 
     # ━━━ Optional Keys ━━━
     omdb_api_key: str = Field(default="", alias="OMDB_API_KEY")
@@ -4481,6 +4482,16 @@ ARAB_FUEL_SOURCES = {
     "SD": {"name_ar": "السودان", "name_en": "Sudan", "types": ["benzin", "diesel", "gas"]},
 }
 
+_GPP_COUNTRY_SLUGS: dict[str, str] = {
+    "SA": "Saudi-Arabia",        "AE": "United-Arab-Emirates", "KW": "Kuwait",
+    "QA": "Qatar",               "BH": "Bahrain",              "OM": "Oman",
+    "EG": "Egypt",               "JO": "Jordan",               "IQ": "Iraq",
+    "MA": "Morocco",             "DZ": "Algeria",              "TN": "Tunisia",
+    "LY": "Libya",               "TR": "Turkey",               "DE": "Germany",
+    "GB": "United-Kingdom",      "JP": "Japan",                "IN": "India",
+    "BR": "Brazil",              "RU": "Russia",               "CN": "China",
+}
+
 _GPP_NAME_TO_CODE: dict[str, str] = {
     "Saudi Arabia": "SA", "United Arab Emirates": "AE", "Egypt": "EG",
     "Kuwait": "KW", "Qatar": "QA", "Bahrain": "BH", "Oman": "OM",
@@ -4922,40 +4933,159 @@ class OmegaFuel:
             logger.info(f"GPP listing cached: {len(result)} countries")
         return result
 
+    async def _fetch_us_eia(self) -> dict | None:
+        """Official EIA weekly retail fuel prices for USA — free API, no scraping."""
+        import httpx as _httpx
+        from config import settings as _cfg
+        eia_key = getattr(_cfg, "eia_api_key", "") or "DEMO_KEY"
+        results: dict[str, str] = {}
+        try:
+            async with _httpx.AsyncClient(timeout=12.0) as cl:
+                for product, label in [("EPM0", "Gasoline (Regular)"), ("EPD2D", "Diesel")]:
+                    r = await cl.get(
+                        "https://api.eia.gov/v2/petroleum/pri/gnd/data/",
+                        params={
+                            "api_key": eia_key,
+                            "frequency": "weekly",
+                            "data[0]": "value",
+                            "facets[duoarea][]": "USA",
+                            "facets[product][]": product,
+                            "sort[0][column]": "period",
+                            "sort[0][direction]": "desc",
+                            "length": "1",
+                        },
+                    )
+                    if r.status_code == 200:
+                        rows = r.json().get("response", {}).get("data", [])
+                        if rows and rows[0].get("value"):
+                            liter = round(float(rows[0]["value"]) / 3.785, 3)
+                            results[label] = f"{liter:.3f} USD/L"
+            if results:
+                logger.info(f"EIA USA prices: {results}")
+        except Exception as exc:
+            logger.debug(f"EIA error: {exc}")
+        return results or None
+
+    async def _fetch_france_open(self) -> dict | None:
+        """Official French weekly average fuel prices — open data, no key needed."""
+        import httpx as _httpx
+        try:
+            async with _httpx.AsyncClient(timeout=12.0, follow_redirects=True) as cl:
+                r = await cl.get(
+                    "https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/"
+                    "prix-moyens-hebdomadaires-des-carburants-en-france/records",
+                    params={"limit": 1, "order_by": "date_debut desc"},
+                )
+                if r.status_code != 200:
+                    return None
+                records = r.json().get("results", [])
+                if not records:
+                    return None
+                rec = records[0]
+                prices: dict[str, str] = {}
+                for field, label in [
+                    ("prix_sp95", "SP95"), ("prix_sp98", "SP98"),
+                    ("prix_gazole", "Diesel"), ("prix_e10", "SP95-E10"),
+                    ("prix_gplc", "GPL"),
+                ]:
+                    v = rec.get(field)
+                    if v:
+                        try:
+                            prices[label] = f"{float(v):.3f} EUR/L"
+                        except (ValueError, TypeError):
+                            pass
+                if prices:
+                    logger.info(f"France official prices: {list(prices.keys())}")
+                return prices or None
+        except Exception as exc:
+            logger.debug(f"France open data error: {exc}")
+        return None
+
+    async def _fetch_country_gpp_page(self, country_code: str) -> dict | None:
+        """Fetch per-country GPP page via ScraperAPI — more targeted than bulk listing."""
+        import httpx as _httpx, re as _re
+        from bs4 import BeautifulSoup
+        from config import settings as _cfg
+        _skey = getattr(_cfg, "scraper_api_key", "") or ""
+        slug = _GPP_COUNTRY_SLUGS.get(country_code)
+        if not slug or not _skey:
+            return None
+        results: dict[str, str] = {}
+        for label, path in [("Gasoline", "gasoline_prices"), ("Diesel", "diesel_prices")]:
+            url = f"https://www.globalpetrolprices.com/{slug}/{path}/"
+            try:
+                async with _httpx.AsyncClient(timeout=25.0) as cl:
+                    r = await cl.get(
+                        "https://api.scraperapi.com/",
+                        params={"api_key": _skey, "url": url, "render": "false"},
+                    )
+                if r.status_code != 200 or len(r.text) < 500:
+                    continue
+                soup = BeautifulSoup(r.text, "lxml")
+                for el in soup.select("td, .graph-price, [class*='price'], strong, b"):
+                    txt = el.get_text(strip=True).replace(",", ".")
+                    m = _re.search(r'\b(\d+\.\d{3,4})\b', txt)
+                    if m:
+                        val = float(m.group(1))
+                        if 0.01 < val < 10.0:
+                            results[label] = f"{val:.3f} USD/L"
+                            break
+            except Exception as exc:
+                logger.debug(f"GPP country page {country_code}/{label}: {exc}")
+        return results or None
+
     async def _get_global_prices(self, country_code: str) -> dict[str, Any]:
-        """Get fuel prices: tries GPP listing page first, then static fallback."""
+        """Get fuel prices with tiered sources: dedicated API → per-country GPP → bulk GPP → static."""
         if country_code in ARAB_FUEL_SOURCES:
             name_ar = ARAB_FUEL_SOURCES[country_code]["name_ar"]
             name_en = ARAB_FUEL_SOURCES[country_code]["name_en"]
         else:
             name_ar, name_en = _COUNTRY_NAMES.get(country_code, (country_code, country_code))
 
-        try:
-            all_prices = await self._fetch_gpp_all()
-        except Exception as exc:
-            logger.warning(f"_fetch_gpp_all raised for {country_code}: {exc}")
-            all_prices = {}
-        if country_code in all_prices:
+        def _ok(prices: dict | None, source: str, stale: bool = False) -> dict[str, Any]:
             return {
                 "country_code":    country_code,
                 "country_name_ar": name_ar,
                 "country_name_en": name_en,
-                "prices":          all_prices[country_code],
-                "source":          "GlobalPetrolPrices",
+                "prices":          prices or {},
+                "source":          source,
+                "stale":           stale,
                 "error":           False,
             }
 
+        # Tier 1 — Dedicated free APIs (no scraping, most reliable)
+        try:
+            if country_code == "US":
+                prices = await self._fetch_us_eia()
+                if prices:
+                    return _ok(prices, "EIA (official)")
+            elif country_code == "FR":
+                prices = await self._fetch_france_open()
+                if prices:
+                    return _ok(prices, "prix-carburants.gouv.fr")
+        except Exception as exc:
+            logger.debug(f"Tier-1 fetcher failed for {country_code}: {exc}")
+
+        # Tier 2 — Per-country GPP page via ScraperAPI
+        try:
+            prices = await self._fetch_country_gpp_page(country_code)
+            if prices:
+                return _ok(prices, "GlobalPetrolPrices")
+        except Exception as exc:
+            logger.debug(f"Tier-2 GPP page failed for {country_code}: {exc}")
+
+        # Tier 3 — Bulk GPP listing (shared cache across all countries)
+        try:
+            all_prices = await self._fetch_gpp_all()
+            if country_code in all_prices:
+                return _ok(all_prices[country_code], "GlobalPetrolPrices")
+        except Exception as exc:
+            logger.warning(f"Tier-3 GPP bulk failed for {country_code}: {exc}")
+
+        # Tier 4 — Static reference prices
         static = _STATIC_FUEL_PRICES.get(country_code)
         if static:
-            return {
-                "country_code":    country_code,
-                "country_name_ar": name_ar,
-                "country_name_en": name_en,
-                "prices":          static,
-                "source":          "static",
-                "stale":           True,
-                "error":           False,
-            }
+            return _ok(static, "static reference", stale=True)
 
         return {
             "country_code":    country_code,

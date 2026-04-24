@@ -58,6 +58,7 @@ class Settings(BaseSettings):
     goldapi_key: str = Field(default="", alias="GOLDAPI_KEY")
     exchange_rate_key: str = Field(default="", alias="EXCHANGE_RATE_KEY")
     scraper_api_key: str = Field(default="", alias="SCRAPER_API_KEY")
+    eia_api_key: str = Field(default="", alias="EIA_API_KEY")
 
     # ━━━ Optional Keys ━━━
     omdb_api_key: str = Field(default="", alias="OMDB_API_KEY")
