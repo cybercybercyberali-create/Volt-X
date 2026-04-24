@@ -44,7 +44,7 @@ _STATIC_FUEL_PRICES: dict[str, dict] = {
     "YE": {"بنزين": "0.530 USD/L", "ديزل": "0.470 USD/L"},
     # Europe & Global
     "TR": {"بنزين 95": "1.290 USD/L", "ديزل": "1.170 USD/L"},
-    "US": {"Gasoline (Regular)": "0.950 USD/L", "Diesel": "1.000 USD/L"},
+    "US": {"Gasoline (Regular)": "1.070 USD/L", "Diesel": "1.427 USD/L"},
     "DE": {"Super E10 (95)": "1.760 USD/L", "Diesel": "1.620 USD/L"},
     "FR": {"SP95-E10": "1.710 USD/L", "Diesel": "1.560 USD/L"},
     "GB": {"Petrol E10": "1.660 USD/L", "Diesel": "1.700 USD/L"},
