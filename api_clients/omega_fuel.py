@@ -433,8 +433,10 @@ class OmegaFuel:
 
     async def _fetch_gpp_all(self) -> dict[str, dict]:
         """
-        Scrape the GlobalPetrolPrices main listing pages (gasoline + diesel).
-        Tries direct fetch first, then ScraperAPI. Cached 12 hours.
+        Scrape GlobalPetrolPrices for all countries.
+        Uses ScraperAPI as PRIMARY when key is set (bypasses IP blocks / Cloudflare).
+        Direct fetch is last-resort only (will be blocked on Render).
+        Cached 12 hours.
         """
         cache_key = "gpp:listing"
         cached = await cache.get(cache_key)
@@ -442,8 +444,11 @@ class OmegaFuel:
             return cached
 
         import re as _re
+        import httpx as _httpx
         from bs4 import BeautifulSoup
+        from config import settings as _cfg
 
+        _skey = getattr(_cfg, "scraper_api_key", "") or ""
         result: dict[str, dict] = {}
 
         async def _parse_gpp_html(html: str, fuel_key: str) -> None:
@@ -467,35 +472,44 @@ class OmegaFuel:
                             result[code][label] = f"{val:.3f} USD/L"
                             break
 
-        from config import settings as _cfg
-        _skey = getattr(_cfg, "scraper_api_key", "") or ""
+        async def _fetch_via_scraperapi(url: str, render: str) -> str | None:
+            try:
+                async with _httpx.AsyncClient(timeout=30.0) as cl:
+                    r = await cl.get(
+                        "https://api.scraperapi.com/",
+                        params={"api_key": _skey, "url": url, "render": render},
+                    )
+                    if r.status_code == 200 and len(r.text) > 2000:
+                        logger.info(f"GPP ScraperAPI render={render} OK: {len(r.text)} bytes ({url})")
+                        return r.text
+                    logger.debug(f"GPP ScraperAPI render={render} short/bad: status={r.status_code} len={len(r.text)}")
+            except Exception as exc:
+                logger.debug(f"GPP ScraperAPI render={render} error: {exc}")
+            return None
+
+        async def _fetch_direct(url: str) -> str | None:
+            try:
+                html = await self._scraper.fetch_html(url, headers=_GPP_BROWSER_HEADERS)
+                if html and len(html) > 2000:
+                    logger.info(f"GPP direct OK: {len(html)} bytes ({url})")
+                    return html
+            except Exception as exc:
+                logger.debug(f"GPP direct fetch error: {exc}")
+            return None
 
         for fuel_key, url_path in [("gasoline", "gasoline_prices"), ("diesel", "diesel_prices")]:
             gpp_url = f"https://www.globalpetrolprices.com/{url_path}/"
             html = None
 
-            # Try direct fetch first
-            try:
-                html = await self._scraper.fetch_html(gpp_url, headers=_GPP_BROWSER_HEADERS)
-                if not html or len(html) < 2000:
-                    html = None
-            except Exception as exc:
-                logger.debug(f"GPP direct fetch failed ({fuel_key}): {exc}")
+            if _skey:
+                # ScraperAPI PRIMARY: plain HTML first (1 credit), JS-rendered fallback (5 credits)
+                html = await _fetch_via_scraperapi(gpp_url, "false")
+                if not html:
+                    html = await _fetch_via_scraperapi(gpp_url, "true")
 
-            # Fallback: ScraperAPI (plain HTML — GPP is server-rendered)
-            if not html and _skey:
-                try:
-                    import httpx as _httpx
-                    async with _httpx.AsyncClient(timeout=25.0) as _cl:
-                        _r = await _cl.get(
-                            "https://api.scraperapi.com/",
-                            params={"api_key": _skey, "url": gpp_url, "render": "false"},
-                        )
-                        if _r.status_code == 200 and len(_r.text) > 2000:
-                            html = _r.text
-                            logger.info(f"GPP via ScraperAPI ({fuel_key}): {len(html)} bytes")
-                except Exception as exc:
-                    logger.debug(f"GPP ScraperAPI failed ({fuel_key}): {exc}")
+            if not html:
+                # Last resort: Render's own IP — likely blocked, but try anyway
+                html = await _fetch_direct(gpp_url)
 
             if html:
                 try:
@@ -505,6 +519,7 @@ class OmegaFuel:
 
         if result:
             await cache.set(cache_key, result, ttl=3600 * 12)
+            logger.info(f"GPP listing cached: {len(result)} countries")
         return result
 
     async def _get_global_prices(self, country_code: str) -> dict[str, Any]:
