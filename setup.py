@@ -4162,17 +4162,17 @@ logger = logging.getLogger(__name__)
 
 
 # Static fallback rates — used when ALL live APIs are down.
-# Updated manually to reflect approximate real-world rates (April 2024 basis).
+# Updated manually to reflect approximate real-world rates (April 2026 basis).
 _STATIC_FALLBACK: dict[tuple, float] = {
-    ("USD", "EUR"): 0.921,  ("USD", "GBP"): 0.789,  ("USD", "JPY"): 149.5,
-    ("USD", "CHF"): 0.891,  ("USD", "CAD"): 1.362,  ("USD", "AUD"): 1.529,
+    ("USD", "EUR"): 0.880,  ("USD", "GBP"): 0.760,  ("USD", "JPY"): 145.0,
+    ("USD", "CHF"): 0.905,  ("USD", "CAD"): 1.390,  ("USD", "AUD"): 1.570,
     ("USD", "LBP"): 89500.0,("USD", "SAR"): 3.750,  ("USD", "AED"): 3.672,
-    ("USD", "EGP"): 48.85,  ("USD", "TRY"): 32.5,   ("USD", "JOD"): 0.709,
+    ("USD", "EGP"): 51.0,   ("USD", "TRY"): 39.0,   ("USD", "JOD"): 0.709,
     ("USD", "KWD"): 0.307,  ("USD", "QAR"): 3.640,  ("USD", "BHD"): 0.376,
     ("USD", "OMR"): 0.385,  ("USD", "IQD"): 1310.0, ("USD", "SYP"): 13000.0,
-    ("USD", "MAD"): 9.97,   ("USD", "DZD"): 134.5,  ("USD", "TND"): 3.11,
-    ("EUR", "USD"): 1.085,  ("EUR", "GBP"): 0.857,  ("EUR", "LBP"): 97020.0,
-    ("GBP", "USD"): 1.267,  ("GBP", "EUR"): 1.167,  ("GBP", "LBP"): 113300.0,
+    ("USD", "MAD"): 9.85,   ("USD", "DZD"): 136.0,  ("USD", "TND"): 3.18,
+    ("EUR", "USD"): 1.136,  ("EUR", "GBP"): 0.864,  ("EUR", "LBP"): 101700.0,
+    ("GBP", "USD"): 1.316,  ("GBP", "EUR"): 1.158,  ("GBP", "LBP"): 117700.0,
 }
 
 def _static_fallback(base: str, target: str) -> float | None:
@@ -5212,7 +5212,15 @@ from services.cache_service import cache
 logger = logging.getLogger(__name__)
 
 BASE = "https://v3.football.api-sports.io"
-CURRENT_SEASON = 2024
+
+
+def _current_season() -> int:
+    """Return the active football season start year (e.g. 2025 for 2025/26)."""
+    now = datetime.now()
+    return now.year if now.month >= 8 else now.year - 1
+
+
+CURRENT_SEASON = _current_season()
 
 MAJOR_LEAGUES = {
     "PL":  {"id": 39,  "name": "Premier League",        "name_ar": "الدوري الإنجليزي",       "country": "England"},
@@ -5232,6 +5240,7 @@ _TSDB_LEAGUE_IDS: dict[str, int] = {
     "BL1": 4331,  # Bundesliga
     "FL1": 4334,  # Ligue 1
     "CL":  4480,  # UEFA Champions League
+    "SPL": 7579,  # Saudi Pro League
     "ELC": 4336,  # Championship
 }
 
@@ -5537,7 +5546,7 @@ class OmegaFootball:
 
         # Source 1 — API-Football (RapidAPI)
         if settings.api_football_key:
-            params: dict[str, Any] = {"league": league_id, "season": CURRENT_SEASON}
+            params: dict[str, Any] = {"league": league_id, "season": _current_season()}
             if status.upper() == "LIVE":
                 params["live"] = "all"
             elif status.upper() not in ("ALL", ""):
@@ -5656,7 +5665,7 @@ class OmegaFootball:
         cached = await cache.get(cache_key)
         if cached is not None:
             return cached
-        data = await self._get("/standings", {"league": league_id, "season": CURRENT_SEASON})
+        data = await self._get("/standings", {"league": league_id, "season": _current_season()})
         if data and "response" in data:
             try:
                 raw = data["response"][0]["league"]["standings"][0]
@@ -5774,19 +5783,10 @@ class OmegaFootball:
         return {"error": True}
 
     async def get_league_teams(self, league_code: str) -> list[dict]:
-        """Return hardcoded [{id, name}] for a league — no API calls, no cache."""
-        _TEAMS: dict[str, list[str]] = {
-            "PD":  ["Alavés","Athletic Club","Atlético Madrid","Barcelona","Celta Vigo","Espanyol","Getafe","Girona","Las Palmas","Leganés","Mallorca","Osasuna","Rayo Vallecano","Real Betis","Real Madrid","Real Sociedad","Sevilla","Valencia","Valladolid","Villarreal"],
-            "PL":  ["Arsenal","Aston Villa","Bournemouth","Brentford","Brighton","Chelsea","Crystal Palace","Everton","Fulham","Ipswich","Leicester","Liverpool","Man City","Man United","Newcastle","Nottm Forest","Southampton","Spurs","West Ham","Wolves"],
-            "SA":  ["AC Milan","Atalanta","Bologna","Cagliari","Como","Empoli","Fiorentina","Genoa","Inter","Juventus","Lazio","Lecce","Monza","Napoli","Parma","Roma","Torino","Udinese","Venezia","Verona"],
-            "BL1": ["Augsburg","Bayern Munich","Bochum","Borussia Dortmund","Eintracht Frankfurt","Freiburg","Hamburg","Heidenheim","Hoffenheim","Köln","Leverkusen","Mainz","Mönchengladbach","RB Leipzig","St. Pauli","Stuttgart","Union Berlin","Werder Bremen"],
-            "FL1": ["Auxerre","Brest","Lens","Lille","Lyon","Marseille","Monaco","Montpellier","Nantes","Nice","Paris FC","PSG","Reims","Rennes","Saint-Etienne","Strasbourg","Toulouse"],
-            "CL":  ["Arsenal","Atlético Madrid","Atalanta","Aston Villa","Barcelona","Bayern Munich","Benfica","Bologna","Brest","Celtic","Club Brugge","Dortmund","Feyenoord","Girona","Inter","Juventus","Leverkusen","Lille","Liverpool","Man City","Monaco","PSG","PSV","RB Leipzig","Real Madrid","Salzburg","Shakhtar","Slovan","Sparta Prague","Sporting CP","Sturm Graz","Stuttgart"],
-            "SPL": ["Al-Ahli","Al-Ettifaq","Al-Fateh","Al-Fayha","Al-Hazem","Al-Hilal","Al-Ittihad","Al-Khaleej","Al-Nassr","Al-Okhdood","Al-Orubah","Al-Qadisiyah","Al-Qadsiah","Al-Raed","Al-Riyadh","Al-Shabab","Al-Taawoun","Al-Wehda"],
-            "ELC": ["Birmingham","Blackburn","Bristol City","Burnley","Cardiff","Coventry","Derby","Leeds","Luton","Middlesbrough","Millwall","Norwich","Oxford","Plymouth","Portsmouth","Preston","QPR","Sheffield United","Sheffield Wed","Stoke","Sunderland","Swansea","Watford","West Brom"],
-        }
+        """Return [{id, name}] for a league using the canonical _FALLBACK_TEAMS list."""
         lc = league_code.upper()
-        return [{"id": i, "name": n} for i, n in enumerate(_TEAMS.get(lc, []))]
+        teams = sorted(_FALLBACK_TEAMS.get(lc, []))
+        return [{"id": i, "name": n} for i, n in enumerate(teams)]
 
     async def get_team_schedule(self, team_id: int) -> dict:
         """Fetch last-5 + next-5 matches for a team from Sofascore."""
@@ -8447,7 +8447,6 @@ async def handle_fb_cb(callback: CallbackQuery, lang: str = "en") -> None:
 async def handle_fb_teams_cb(callback: CallbackQuery, lang: str = "en") -> None:
     await callback.answer("⏳")
     league_code = callback.data.split(":", 1)[1].upper()
-    logger.info(f"DEBUG fb_teams: raw='{callback.data}' → league_code='{league_code}' lang='{lang}'")
     league_name = _league_name(league_code, lang)
 
     teams = []
@@ -8455,7 +8454,6 @@ async def handle_fb_teams_cb(callback: CallbackQuery, lang: str = "en") -> None:
         teams = await omega_football.get_league_teams(league_code)
     except Exception as exc:
         logger.error(f"get_league_teams error {league_code}: {exc}", exc_info=True)
-    logger.info(f"DEBUG teams result: count={len(teams)} first={teams[:2] if teams else 'EMPTY'}")
 
     if not teams:
         from api_clients.omega_football import _FALLBACK_TEAMS
@@ -8469,17 +8467,15 @@ async def handle_fb_teams_cb(callback: CallbackQuery, lang: str = "en") -> None:
 
     choose_lbl = "🏟️ اختر الفريق:" if lang == "ar" else "🏟️ Choose a team:"
     text = f"⚽ *{league_name}*\n\n{choose_lbl}"
-    logger.info(f"DEBUG before keyboard: teams={len(teams)} league={league_code} lang={lang}")
     kb = _team_kb(teams, league_code, lang)
-    logger.info(f"DEBUG kb built: rows={len(kb.inline_keyboard)} first_row_btns={len(kb.inline_keyboard[0]) if kb.inline_keyboard else 0}")
     try:
         await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
     except Exception as exc:
-        logger.warning(f"DEBUG edit_text failed: {exc}")
+        logger.warning(f"edit_text failed: {exc}")
         try:
             await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
         except Exception as exc2:
-            logger.error(f"DEBUG answer failed: {exc2}", exc_info=True)
+            logger.error(f"answer failed: {exc2}", exc_info=True)
 
 
 # ── callback: team schedule ───────────────────────────────────────────────────

@@ -10,7 +10,15 @@ from services.cache_service import cache
 logger = logging.getLogger(__name__)
 
 BASE = "https://v3.football.api-sports.io"
-CURRENT_SEASON = 2024
+
+
+def _current_season() -> int:
+    """Return the active football season start year (e.g. 2025 for 2025/26)."""
+    now = datetime.now()
+    return now.year if now.month >= 8 else now.year - 1
+
+
+CURRENT_SEASON = _current_season()
 
 MAJOR_LEAGUES = {
     "PL":  {"id": 39,  "name": "Premier League",        "name_ar": "الدوري الإنجليزي",       "country": "England"},
@@ -31,6 +39,7 @@ _TSDB_LEAGUE_IDS: dict[str, int] = {
     "BL1": 4331,  # Bundesliga
     "FL1": 4334,  # Ligue 1
     "CL":  4480,  # UEFA Champions League
+    "SPL": 7579,  # Saudi Pro League
     "ELC": 4336,  # Championship
 }
 
@@ -336,7 +345,7 @@ class OmegaFootball:
 
         # Source 1 — API-Football (RapidAPI)
         if settings.api_football_key:
-            params: dict[str, Any] = {"league": league_id, "season": CURRENT_SEASON}
+            params: dict[str, Any] = {"league": league_id, "season": _current_season()}
             if status.upper() == "LIVE":
                 params["live"] = "all"
             elif status.upper() not in ("ALL", ""):
@@ -455,7 +464,7 @@ class OmegaFootball:
         cached = await cache.get(cache_key)
         if cached is not None:
             return cached
-        data = await self._get("/standings", {"league": league_id, "season": CURRENT_SEASON})
+        data = await self._get("/standings", {"league": league_id, "season": _current_season()})
         if data and "response" in data:
             try:
                 raw = data["response"][0]["league"]["standings"][0]
@@ -573,19 +582,10 @@ class OmegaFootball:
         return {"error": True}
 
     async def get_league_teams(self, league_code: str) -> list[dict]:
-        """Return hardcoded [{id, name}] for a league — no API calls, no cache."""
-        _TEAMS: dict[str, list[str]] = {
-            "PD":  ["Alavés","Athletic Club","Atlético Madrid","Barcelona","Celta Vigo","Espanyol","Getafe","Girona","Las Palmas","Leganés","Mallorca","Osasuna","Rayo Vallecano","Real Betis","Real Madrid","Real Sociedad","Sevilla","Valencia","Valladolid","Villarreal"],
-            "PL":  ["Arsenal","Aston Villa","Bournemouth","Brentford","Brighton","Chelsea","Crystal Palace","Everton","Fulham","Ipswich","Leicester","Liverpool","Man City","Man United","Newcastle","Nottm Forest","Southampton","Spurs","West Ham","Wolves"],
-            "SA":  ["AC Milan","Atalanta","Bologna","Cagliari","Como","Empoli","Fiorentina","Genoa","Inter","Juventus","Lazio","Lecce","Monza","Napoli","Parma","Roma","Torino","Udinese","Venezia","Verona"],
-            "BL1": ["Augsburg","Bayern Munich","Bochum","Borussia Dortmund","Eintracht Frankfurt","Freiburg","Hamburg","Heidenheim","Hoffenheim","Köln","Leverkusen","Mainz","Mönchengladbach","RB Leipzig","St. Pauli","Stuttgart","Union Berlin","Werder Bremen"],
-            "FL1": ["Auxerre","Brest","Lens","Lille","Lyon","Marseille","Monaco","Montpellier","Nantes","Nice","Paris FC","PSG","Reims","Rennes","Saint-Etienne","Strasbourg","Toulouse"],
-            "CL":  ["Arsenal","Atlético Madrid","Atalanta","Aston Villa","Barcelona","Bayern Munich","Benfica","Bologna","Brest","Celtic","Club Brugge","Dortmund","Feyenoord","Girona","Inter","Juventus","Leverkusen","Lille","Liverpool","Man City","Monaco","PSG","PSV","RB Leipzig","Real Madrid","Salzburg","Shakhtar","Slovan","Sparta Prague","Sporting CP","Sturm Graz","Stuttgart"],
-            "SPL": ["Al-Ahli","Al-Ettifaq","Al-Fateh","Al-Fayha","Al-Hazem","Al-Hilal","Al-Ittihad","Al-Khaleej","Al-Nassr","Al-Okhdood","Al-Orubah","Al-Qadisiyah","Al-Qadsiah","Al-Raed","Al-Riyadh","Al-Shabab","Al-Taawoun","Al-Wehda"],
-            "ELC": ["Birmingham","Blackburn","Bristol City","Burnley","Cardiff","Coventry","Derby","Leeds","Luton","Middlesbrough","Millwall","Norwich","Oxford","Plymouth","Portsmouth","Preston","QPR","Sheffield United","Sheffield Wed","Stoke","Sunderland","Swansea","Watford","West Brom"],
-        }
+        """Return [{id, name}] for a league using the canonical _FALLBACK_TEAMS list."""
         lc = league_code.upper()
-        return [{"id": i, "name": n} for i, n in enumerate(_TEAMS.get(lc, []))]
+        teams = sorted(_FALLBACK_TEAMS.get(lc, []))
+        return [{"id": i, "name": n} for i, n in enumerate(teams)]
 
     async def get_team_schedule(self, team_id: int) -> dict:
         """Fetch last-5 + next-5 matches for a team from Sofascore."""

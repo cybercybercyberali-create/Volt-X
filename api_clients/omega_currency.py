@@ -11,17 +11,17 @@ logger = logging.getLogger(__name__)
 
 
 # Static fallback rates — used when ALL live APIs are down.
-# Updated manually to reflect approximate real-world rates (April 2024 basis).
+# Updated manually to reflect approximate real-world rates (April 2026 basis).
 _STATIC_FALLBACK: dict[tuple, float] = {
-    ("USD", "EUR"): 0.921,  ("USD", "GBP"): 0.789,  ("USD", "JPY"): 149.5,
-    ("USD", "CHF"): 0.891,  ("USD", "CAD"): 1.362,  ("USD", "AUD"): 1.529,
+    ("USD", "EUR"): 0.880,  ("USD", "GBP"): 0.760,  ("USD", "JPY"): 145.0,
+    ("USD", "CHF"): 0.905,  ("USD", "CAD"): 1.390,  ("USD", "AUD"): 1.570,
     ("USD", "LBP"): 89500.0,("USD", "SAR"): 3.750,  ("USD", "AED"): 3.672,
-    ("USD", "EGP"): 48.85,  ("USD", "TRY"): 32.5,   ("USD", "JOD"): 0.709,
+    ("USD", "EGP"): 51.0,   ("USD", "TRY"): 39.0,   ("USD", "JOD"): 0.709,
     ("USD", "KWD"): 0.307,  ("USD", "QAR"): 3.640,  ("USD", "BHD"): 0.376,
     ("USD", "OMR"): 0.385,  ("USD", "IQD"): 1310.0, ("USD", "SYP"): 13000.0,
-    ("USD", "MAD"): 9.97,   ("USD", "DZD"): 134.5,  ("USD", "TND"): 3.11,
-    ("EUR", "USD"): 1.085,  ("EUR", "GBP"): 0.857,  ("EUR", "LBP"): 97020.0,
-    ("GBP", "USD"): 1.267,  ("GBP", "EUR"): 1.167,  ("GBP", "LBP"): 113300.0,
+    ("USD", "MAD"): 9.85,   ("USD", "DZD"): 136.0,  ("USD", "TND"): 3.18,
+    ("EUR", "USD"): 1.136,  ("EUR", "GBP"): 0.864,  ("EUR", "LBP"): 101700.0,
+    ("GBP", "USD"): 1.316,  ("GBP", "EUR"): 1.158,  ("GBP", "LBP"): 117700.0,
 }
 
 def _static_fallback(base: str, target: str) -> float | None:
