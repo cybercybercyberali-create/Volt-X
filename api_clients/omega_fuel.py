@@ -175,7 +175,11 @@ class OmegaFuel:
             result["stale"]          = True
             return result
 
-        global_prices = await self._get_global_prices(country_code)
+        try:
+            global_prices = await self._get_global_prices(country_code)
+        except Exception as exc:
+            logger.warning(f"_get_global_prices raised for {country_code}: {exc}")
+            global_prices = None
         if global_prices and not global_prices.get("error"):
             result["prices"] = global_prices.get("prices", {})
             result["stale"]  = global_prices.get("stale", False)
@@ -512,7 +516,11 @@ class OmegaFuel:
             name_ar, name_en = _COUNTRY_NAMES.get(country_code, (country_code, country_code))
 
         # Primary: scrape main GPP listing (all countries at once)
-        all_prices = await self._fetch_gpp_all()
+        try:
+            all_prices = await self._fetch_gpp_all()
+        except Exception as exc:
+            logger.warning(f"_fetch_gpp_all raised for {country_code}: {exc}")
+            all_prices = {}
         if country_code in all_prices:
             return {
                 "country_code":    country_code,
