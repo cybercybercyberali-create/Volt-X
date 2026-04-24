@@ -9215,9 +9215,70 @@ async def process_ai_query(message: Message, query: str, lang: str = "en") -> No
         await message.answer(t("error", lang))
 
 
+_VISION_PROVIDERS = [
+    {"provider": "gemini",     "model": "gemini-2.0-flash"},
+    {"provider": "openrouter", "model": "google/gemini-2.0-flash-exp:free"},
+    {"provider": "openrouter", "model": "qwen/qwen2.5-vl-72b-instruct:free"},
+    {"provider": "openrouter", "model": "meta-llama/llama-3.2-11b-vision-instruct:free"},
+]
+
+
+async def _analyze_image(img_b64: str, caption: str, system_text: str) -> str:
+    """Try vision-capable providers in order until one succeeds."""
+    for vp in _VISION_PROVIDERS:
+        provider, model = vp["provider"], vp["model"]
+        try:
+            if provider == "gemini":
+                key = settings.gemini_api_key
+                if not key:
+                    continue
+                url = (
+                    f"https://generativelanguage.googleapis.com/v1beta/models/"
+                    f"{model}:generateContent?key={key}"
+                )
+                payload = {
+                    "contents": [{"parts": [
+                        {"inline_data": {"mime_type": "image/jpeg", "data": img_b64}},
+                        {"text": f"System: {system_text}\n\nUser: {caption}"},
+                    ]}],
+                    "generationConfig": {"maxOutputTokens": 1024, "temperature": 0.7},
+                }
+                async with httpx.AsyncClient(timeout=30) as client:
+                    resp = await client.post(url, json=payload)
+                    resp.raise_for_status()
+                    return resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+
+            elif provider == "openrouter":
+                key = settings.openrouter_api_key
+                if not key:
+                    continue
+                payload = {
+                    "model": model,
+                    "messages": [{"role": "user", "content": [
+                        {"type": "text", "text": f"System: {system_text}\n\nUser: {caption}"},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}},
+                    ]}],
+                    "max_tokens": 1024,
+                }
+                async with httpx.AsyncClient(timeout=30) as client:
+                    resp = await client.post(
+                        "https://openrouter.ai/api/v1/chat/completions",
+                        json=payload,
+                        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                    )
+                    resp.raise_for_status()
+                    return resp.json()["choices"][0]["message"]["content"]
+
+        except Exception as exc:
+            logger.debug(f"Vision {provider}/{model} failed: {exc}")
+            continue
+
+    raise RuntimeError("All vision providers failed")
+
+
 @router.message(F.photo)
 async def handle_photo_message(message: Message, lang: str = "en") -> None:
-    """Analyze image using Gemini vision (multimodal)."""
+    """Analyze image using best available vision provider."""
     caption = (message.caption or "").strip()
     if not caption:
         caption = (
@@ -9230,8 +9291,7 @@ async def handle_photo_message(message: Message, lang: str = "en") -> None:
         await message.answer(t("rate_limited", lang))
         return
 
-    api_key = settings.gemini_api_key
-    if not api_key:
+    if not (settings.gemini_api_key or settings.openrouter_api_key):
         await message.answer(
             "❌ تحليل الصور غير مفعّل حالياً."
             if lang == "ar"
@@ -9252,26 +9312,8 @@ async def handle_photo_message(message: Message, lang: str = "en") -> None:
         img_b64 = base64.b64encode(bio.read()).decode()
 
         system_text = SYSTEM_PROMPT + f"\n\n{_current_date_block()}"
-        url = (
-            "https://generativelanguage.googleapis.com/v1beta/models/"
-            f"gemini-2.0-flash:generateContent?key={api_key}"
-        )
-        payload = {
-            "contents": [{
-                "parts": [
-                    {"inline_data": {"mime_type": "image/jpeg", "data": img_b64}},
-                    {"text": f"System: {system_text}\n\nUser: {caption}"},
-                ]
-            }],
-            "generationConfig": {"maxOutputTokens": 1024, "temperature": 0.7},
-        }
+        text = await _analyze_image(img_b64, caption, system_text)
 
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(url, json=payload)
-            resp.raise_for_status()
-            data = resp.json()
-
-        text = data["candidates"][0]["content"]["parts"][0]["text"]
         if len(text) > 4000:
             text = text[:4000] + "..."
 
@@ -10745,7 +10787,12 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(_clear_fuel_caches())
     asyncio.create_task(_clear_stale_team_caches())
     asyncio.create_task(_fuel_refresh_loop())
-    logger.info("✅ Fuel auto-refresh task started (24 h interval)")
+    asyncio.create_task(_football_refresh_loop())
+    asyncio.create_task(_currency_refresh_loop())
+    asyncio.create_task(_crypto_refresh_loop())
+    asyncio.create_task(_metals_refresh_loop())
+    asyncio.create_task(_news_refresh_loop())
+    logger.info("✅ All background refresh tasks started")
 
     from workers.notification_worker import notification_worker
     await notification_worker.start(bot)
@@ -10853,8 +10900,9 @@ async def _clear_stale_team_caches():
 
 
 async def _fuel_refresh_loop():
-    """Fetch Lebanon fuel prices once at startup then every 24 h."""
+    """Refresh fuel prices for all supported countries every 24 h."""
     from api_clients.omega_fuel import omega_fuel
+    from handlers.fuel import _FUEL_COUNTRIES
     await asyncio.sleep(15)
     while True:
         try:
@@ -10865,8 +10913,102 @@ async def _fuel_refresh_loop():
             else:
                 logger.warning("⚠️ Fuel LB refresh returned no data")
         except Exception as exc:
-            logger.warning(f"Fuel refresh error: {exc}")
+            logger.warning(f"Fuel LB refresh error: {exc}")
+        refreshed = 0
+        for _, code in _FUEL_COUNTRIES:
+            if code == "LB":
+                continue
+            try:
+                await omega_fuel.get_prices(code)
+                refreshed += 1
+                await asyncio.sleep(3)
+            except Exception as exc:
+                logger.debug(f"Fuel refresh {code}: {exc}")
+        logger.info(f"✅ Fuel refreshed for {refreshed} other countries")
         await asyncio.sleep(86400)
+
+
+async def _football_refresh_loop():
+    """Pre-warm football fixtures for all major leagues every 60 minutes."""
+    from api_clients.omega_football import omega_football, MAJOR_LEAGUES
+    await asyncio.sleep(45)
+    while True:
+        refreshed = 0
+        for code in MAJOR_LEAGUES:
+            try:
+                result = await omega_football.get_fixtures(code)
+                if result and not isinstance(result, dict):
+                    refreshed += 1
+                await asyncio.sleep(3)
+            except Exception as exc:
+                logger.debug(f"Football refresh {code}: {exc}")
+        logger.info(f"✅ Football fixtures refreshed: {refreshed}/{len(MAJOR_LEAGUES)} leagues")
+        await asyncio.sleep(3600)
+
+
+async def _currency_refresh_loop():
+    """Pre-warm major currency pairs every 60 minutes."""
+    from api_clients.omega_currency import omega_currency
+    _PAIRS = [
+        ("USD", "EUR"), ("USD", "GBP"), ("USD", "LBP"),
+        ("USD", "SAR"), ("USD", "AED"), ("USD", "EGP"),
+        ("USD", "TRY"), ("EUR", "USD"), ("GBP", "USD"),
+        ("USD", "JOD"), ("USD", "KWD"), ("USD", "JPY"),
+    ]
+    await asyncio.sleep(75)
+    while True:
+        for base, target in _PAIRS:
+            try:
+                await omega_currency.get_rate(base, target)
+                await asyncio.sleep(2)
+            except Exception as exc:
+                logger.debug(f"Currency refresh {base}/{target}: {exc}")
+        logger.info("✅ Currency rates refreshed")
+        await asyncio.sleep(3600)
+
+
+async def _crypto_refresh_loop():
+    """Pre-warm top crypto prices every 30 minutes."""
+    from api_clients.omega_crypto import omega_crypto
+    _TOP = ["bitcoin", "ethereum", "binancecoin", "solana", "ripple", "dogecoin"]
+    await asyncio.sleep(105)
+    while True:
+        for coin in _TOP:
+            try:
+                await omega_crypto.get_price(coin)
+                await asyncio.sleep(2)
+            except Exception as exc:
+                logger.debug(f"Crypto refresh {coin}: {exc}")
+        logger.info("✅ Crypto prices refreshed")
+        await asyncio.sleep(1800)
+
+
+async def _metals_refresh_loop():
+    """Pre-warm gold/silver/metals prices every 30 minutes."""
+    from api_clients.omega_metals import omega_metals
+    await asyncio.sleep(120)
+    while True:
+        try:
+            await omega_metals.get_all_metals()
+            logger.info("✅ Metals prices refreshed")
+        except Exception as exc:
+            logger.debug(f"Metals refresh: {exc}")
+        await asyncio.sleep(1800)
+
+
+async def _news_refresh_loop():
+    """Pre-warm news headlines every 30 minutes."""
+    from api_clients.omega_news import omega_news
+    await asyncio.sleep(150)
+    while True:
+        try:
+            await omega_news.get_headlines(lang="ar")
+            await asyncio.sleep(3)
+            await omega_news.get_headlines(lang="en")
+            logger.info("✅ News refreshed (AR + EN)")
+        except Exception as exc:
+            logger.debug(f"News refresh: {exc}")
+        await asyncio.sleep(1800)
 
 
 async def _self_ping():

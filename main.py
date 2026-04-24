@@ -90,7 +90,12 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(_clear_fuel_caches())
     asyncio.create_task(_clear_stale_team_caches())
     asyncio.create_task(_fuel_refresh_loop())
-    logger.info("✅ Fuel auto-refresh task started (24 h interval)")
+    asyncio.create_task(_football_refresh_loop())
+    asyncio.create_task(_currency_refresh_loop())
+    asyncio.create_task(_crypto_refresh_loop())
+    asyncio.create_task(_metals_refresh_loop())
+    asyncio.create_task(_news_refresh_loop())
+    logger.info("✅ All background refresh tasks started")
 
     from workers.notification_worker import notification_worker
     await notification_worker.start(bot)
@@ -198,9 +203,10 @@ async def _clear_stale_team_caches():
 
 
 async def _fuel_refresh_loop():
-    """Fetch Lebanon fuel prices once at startup then every 24 h."""
+    """Refresh fuel prices for all supported countries every 24 h."""
     from api_clients.omega_fuel import omega_fuel
-    await asyncio.sleep(15)          # let the bot fully boot first
+    from handlers.fuel import _FUEL_COUNTRIES
+    await asyncio.sleep(15)
     while True:
         try:
             result = await omega_fuel.get_prices("LB", force=True)
@@ -210,8 +216,102 @@ async def _fuel_refresh_loop():
             else:
                 logger.warning("⚠️ Fuel LB refresh returned no data")
         except Exception as exc:
-            logger.warning(f"Fuel refresh error: {exc}")
-        await asyncio.sleep(86400)   # 24 hours
+            logger.warning(f"Fuel LB refresh error: {exc}")
+        refreshed = 0
+        for _, code in _FUEL_COUNTRIES:
+            if code == "LB":
+                continue
+            try:
+                await omega_fuel.get_prices(code)
+                refreshed += 1
+                await asyncio.sleep(3)
+            except Exception as exc:
+                logger.debug(f"Fuel refresh {code}: {exc}")
+        logger.info(f"✅ Fuel refreshed for {refreshed} other countries")
+        await asyncio.sleep(86400)
+
+
+async def _football_refresh_loop():
+    """Pre-warm football fixtures for all major leagues every 60 minutes."""
+    from api_clients.omega_football import omega_football, MAJOR_LEAGUES
+    await asyncio.sleep(45)
+    while True:
+        refreshed = 0
+        for code in MAJOR_LEAGUES:
+            try:
+                result = await omega_football.get_fixtures(code)
+                if result and not isinstance(result, dict):
+                    refreshed += 1
+                await asyncio.sleep(3)
+            except Exception as exc:
+                logger.debug(f"Football refresh {code}: {exc}")
+        logger.info(f"✅ Football fixtures refreshed: {refreshed}/{len(MAJOR_LEAGUES)} leagues")
+        await asyncio.sleep(3600)
+
+
+async def _currency_refresh_loop():
+    """Pre-warm major currency pairs every 60 minutes."""
+    from api_clients.omega_currency import omega_currency
+    _PAIRS = [
+        ("USD", "EUR"), ("USD", "GBP"), ("USD", "LBP"),
+        ("USD", "SAR"), ("USD", "AED"), ("USD", "EGP"),
+        ("USD", "TRY"), ("EUR", "USD"), ("GBP", "USD"),
+        ("USD", "JOD"), ("USD", "KWD"), ("USD", "JPY"),
+    ]
+    await asyncio.sleep(75)
+    while True:
+        for base, target in _PAIRS:
+            try:
+                await omega_currency.get_rate(base, target)
+                await asyncio.sleep(2)
+            except Exception as exc:
+                logger.debug(f"Currency refresh {base}/{target}: {exc}")
+        logger.info("✅ Currency rates refreshed")
+        await asyncio.sleep(3600)
+
+
+async def _crypto_refresh_loop():
+    """Pre-warm top crypto prices every 30 minutes."""
+    from api_clients.omega_crypto import omega_crypto
+    _TOP = ["bitcoin", "ethereum", "binancecoin", "solana", "ripple", "dogecoin"]
+    await asyncio.sleep(105)
+    while True:
+        for coin in _TOP:
+            try:
+                await omega_crypto.get_price(coin)
+                await asyncio.sleep(2)
+            except Exception as exc:
+                logger.debug(f"Crypto refresh {coin}: {exc}")
+        logger.info("✅ Crypto prices refreshed")
+        await asyncio.sleep(1800)
+
+
+async def _metals_refresh_loop():
+    """Pre-warm gold/silver/metals prices every 30 minutes."""
+    from api_clients.omega_metals import omega_metals
+    await asyncio.sleep(120)
+    while True:
+        try:
+            await omega_metals.get_all_metals()
+            logger.info("✅ Metals prices refreshed")
+        except Exception as exc:
+            logger.debug(f"Metals refresh: {exc}")
+        await asyncio.sleep(1800)
+
+
+async def _news_refresh_loop():
+    """Pre-warm news headlines every 30 minutes."""
+    from api_clients.omega_news import omega_news
+    await asyncio.sleep(150)
+    while True:
+        try:
+            await omega_news.get_headlines(lang="ar")
+            await asyncio.sleep(3)
+            await omega_news.get_headlines(lang="en")
+            logger.info("✅ News refreshed (AR + EN)")
+        except Exception as exc:
+            logger.debug(f"News refresh: {exc}")
+        await asyncio.sleep(1800)
 
 
 async def _self_ping():

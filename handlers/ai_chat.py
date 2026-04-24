@@ -461,9 +461,70 @@ async def process_ai_query(message: Message, query: str, lang: str = "en") -> No
         await message.answer(t("error", lang))
 
 
+_VISION_PROVIDERS = [
+    {"provider": "gemini",     "model": "gemini-2.0-flash"},
+    {"provider": "openrouter", "model": "google/gemini-2.0-flash-exp:free"},
+    {"provider": "openrouter", "model": "qwen/qwen2.5-vl-72b-instruct:free"},
+    {"provider": "openrouter", "model": "meta-llama/llama-3.2-11b-vision-instruct:free"},
+]
+
+
+async def _analyze_image(img_b64: str, caption: str, system_text: str) -> str:
+    """Try vision-capable providers in order until one succeeds."""
+    for vp in _VISION_PROVIDERS:
+        provider, model = vp["provider"], vp["model"]
+        try:
+            if provider == "gemini":
+                key = settings.gemini_api_key
+                if not key:
+                    continue
+                url = (
+                    f"https://generativelanguage.googleapis.com/v1beta/models/"
+                    f"{model}:generateContent?key={key}"
+                )
+                payload = {
+                    "contents": [{"parts": [
+                        {"inline_data": {"mime_type": "image/jpeg", "data": img_b64}},
+                        {"text": f"System: {system_text}\n\nUser: {caption}"},
+                    ]}],
+                    "generationConfig": {"maxOutputTokens": 1024, "temperature": 0.7},
+                }
+                async with httpx.AsyncClient(timeout=30) as client:
+                    resp = await client.post(url, json=payload)
+                    resp.raise_for_status()
+                    return resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+
+            elif provider == "openrouter":
+                key = settings.openrouter_api_key
+                if not key:
+                    continue
+                payload = {
+                    "model": model,
+                    "messages": [{"role": "user", "content": [
+                        {"type": "text", "text": f"System: {system_text}\n\nUser: {caption}"},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}},
+                    ]}],
+                    "max_tokens": 1024,
+                }
+                async with httpx.AsyncClient(timeout=30) as client:
+                    resp = await client.post(
+                        "https://openrouter.ai/api/v1/chat/completions",
+                        json=payload,
+                        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                    )
+                    resp.raise_for_status()
+                    return resp.json()["choices"][0]["message"]["content"]
+
+        except Exception as exc:
+            logger.debug(f"Vision {provider}/{model} failed: {exc}")
+            continue
+
+    raise RuntimeError("All vision providers failed")
+
+
 @router.message(F.photo)
 async def handle_photo_message(message: Message, lang: str = "en") -> None:
-    """Analyze image using Gemini vision (multimodal)."""
+    """Analyze image using best available vision provider."""
     caption = (message.caption or "").strip()
     if not caption:
         caption = (
@@ -476,8 +537,7 @@ async def handle_photo_message(message: Message, lang: str = "en") -> None:
         await message.answer(t("rate_limited", lang))
         return
 
-    api_key = settings.gemini_api_key
-    if not api_key:
+    if not (settings.gemini_api_key or settings.openrouter_api_key):
         await message.answer(
             "❌ تحليل الصور غير مفعّل حالياً."
             if lang == "ar"
@@ -498,26 +558,8 @@ async def handle_photo_message(message: Message, lang: str = "en") -> None:
         img_b64 = base64.b64encode(bio.read()).decode()
 
         system_text = SYSTEM_PROMPT + f"\n\n{_current_date_block()}"
-        url = (
-            "https://generativelanguage.googleapis.com/v1beta/models/"
-            f"gemini-2.0-flash:generateContent?key={api_key}"
-        )
-        payload = {
-            "contents": [{
-                "parts": [
-                    {"inline_data": {"mime_type": "image/jpeg", "data": img_b64}},
-                    {"text": f"System: {system_text}\n\nUser: {caption}"},
-                ]
-            }],
-            "generationConfig": {"maxOutputTokens": 1024, "temperature": 0.7},
-        }
+        text = await _analyze_image(img_b64, caption, system_text)
 
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(url, json=payload)
-            resp.raise_for_status()
-            data = resp.json()
-
-        text = data["candidates"][0]["content"]["parts"][0]["text"]
         if len(text) > 4000:
             text = text[:4000] + "..."
 
