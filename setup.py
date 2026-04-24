@@ -4934,32 +4934,56 @@ class OmegaFuel:
         return result
 
     async def _fetch_us_eia(self) -> dict | None:
-        """Official EIA weekly retail fuel prices for USA — free API, no scraping."""
-        import httpx as _httpx
+        """Official EIA weekly retail fuel prices for USA — routed via ScraperAPI to bypass Render IP block."""
+        import httpx as _httpx, urllib.parse as _up
         from config import settings as _cfg
         eia_key = getattr(_cfg, "eia_api_key", "") or "DEMO_KEY"
+        scraper_key = getattr(_cfg, "scraper_api_key", "") or ""
         results: dict[str, str] = {}
         try:
-            async with _httpx.AsyncClient(timeout=12.0) as cl:
+            async with _httpx.AsyncClient(timeout=20.0) as cl:
                 for product, label in [("EPM0", "Gasoline (Regular)"), ("EPD2D", "Diesel")]:
-                    r = await cl.get(
-                        "https://api.eia.gov/v2/petroleum/pri/gnd/data/",
-                        params={
-                            "api_key": eia_key,
-                            "frequency": "weekly",
-                            "data[0]": "value",
-                            "facets[duoarea][]": "USA",
-                            "facets[product][]": product,
-                            "sort[0][column]": "period",
-                            "sort[0][direction]": "desc",
-                            "length": "1",
-                        },
-                    )
-                    if r.status_code == 200:
-                        rows = r.json().get("response", {}).get("data", [])
-                        if rows and rows[0].get("value"):
-                            liter = round(float(rows[0]["value"]) / 3.785, 3)
-                            results[label] = f"{liter:.3f} USD/L"
+                    eia_params = {
+                        "api_key": eia_key,
+                        "frequency": "weekly",
+                        "data[0]": "value",
+                        "facets[duoarea][]": "USA",
+                        "facets[product][]": product,
+                        "sort[0][column]": "period",
+                        "sort[0][direction]": "desc",
+                        "length": "1",
+                    }
+                    # Build full EIA URL so ScraperAPI can proxy it
+                    eia_url = "https://api.eia.gov/v2/petroleum/pri/gnd/data/?" + _up.urlencode(eia_params)
+                    # Try ScraperAPI proxy first — bypasses Render's blocked IP
+                    r = None
+                    if scraper_key:
+                        try:
+                            r = await cl.get(
+                                "https://api.scraperapi.com/",
+                                params={"api_key": scraper_key, "url": eia_url, "render": "false"},
+                                timeout=20.0,
+                            )
+                        except Exception:
+                            r = None
+                    # Direct fallback (works if EIA doesn't block this IP)
+                    if r is None or r.status_code != 200:
+                        try:
+                            r = await cl.get(
+                                "https://api.eia.gov/v2/petroleum/pri/gnd/data/",
+                                params=eia_params,
+                                timeout=12.0,
+                            )
+                        except Exception:
+                            continue
+                    if r and r.status_code == 200:
+                        try:
+                            rows = r.json().get("response", {}).get("data", [])
+                            if rows and rows[0].get("value"):
+                                liter = round(float(rows[0]["value"]) / 3.785, 3)
+                                results[label] = f"{liter:.3f} USD/L"
+                        except Exception:
+                            pass
             if results:
                 logger.info(f"EIA USA prices: {results}")
         except Exception as exc:
