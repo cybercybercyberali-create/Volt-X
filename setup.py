@@ -8901,6 +8901,29 @@ async def cmd_movie(message: Message, lang: str = "en") -> None:
         await message.answer(t("error", lang))
 
 
+@router.message(Command("trending"))
+async def cmd_trending(message: Message, lang: str = "en") -> None:
+    wait = await message.answer(
+        "⏳ جارٍ تحميل الأكثر مشاهدةً..." if lang == "ar"
+        else "⏳ Loading trending movies..."
+    )
+    try:
+        tmdb_lang = "ar" if lang == "ar" else "en-US"
+        data = await omega_movies.get_trending(lang=tmdb_lang)
+        if data.get("error") or not data.get("results"):
+            await wait.edit_text(t("not_found", lang))
+            return
+        await wait.delete()
+        for item in data["results"][:5]:
+            await _send_card(message, item, lang)
+    except Exception as exc:
+        logger.error(f"Trending error: {exc}", exc_info=True)
+        try:
+            await wait.edit_text(t("error", lang))
+        except Exception:
+            pass
+
+
 @router.callback_query(lambda c: c.data and c.data.startswith("mv_g:"))
 async def handle_genre_cb(callback: CallbackQuery, lang: str = "en") -> None:
     await callback.answer("⏳")
@@ -8909,13 +8932,16 @@ async def handle_genre_cb(callback: CallbackQuery, lang: str = "en") -> None:
     except (IndexError, ValueError):
         return
 
-    data = await omega_movies.get_by_genre(genre_id, lang=lang)
-    if data.get("error") or not data.get("results"):
-        await callback.message.answer(t("not_found", lang))
-        return
-
-    for item in data["results"][:5]:
-        await _send_card(callback.message, item, lang)
+    try:
+        data = await omega_movies.get_by_genre(genre_id, lang=lang)
+        if data.get("error") or not data.get("results"):
+            await callback.message.answer(t("not_found", lang))
+            return
+        for item in data["results"][:5]:
+            await _send_card(callback.message, item, lang)
+    except Exception as exc:
+        logger.error(f"Genre movies error: {exc}", exc_info=True)
+        await callback.message.answer(t("error", lang))
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("mv:"))
@@ -8929,38 +8955,45 @@ async def handle_mv_cb(callback: CallbackQuery, lang: str = "en") -> None:
     except (ValueError, IndexError):
         return
 
-    data = await omega_movies.get_details(tmdb_id, media_type)
-    if data.get("error"):
+    try:
+        data = await omega_movies.get_details(tmdb_id, media_type)
+        if data.get("error"):
+            await callback.message.answer(t("error", lang))
+            return
+
+        title = data.get("title", "")
+        rd = data.get("release_date", "")
+        year = rd[:4] if rd else "?"
+        vote = data.get("vote_average", 0)
+        genres = " · ".join(data.get("genres", [])[:3])
+        overview = (data.get("overview") or "")[:200]
+
+        text = (
+            f"🎬 *{title}* `({year})`\n"
+            f"⭐ `{vote}/10`  ·  🎭 {genres}\n"
+            f"📅 {rd}"
+        )
+        if data.get("runtime"):
+            text += f"  ·  ⏱ {data['runtime']} min"
+        if data.get("tagline"):
+            text += f"\n\n_{data['tagline']}_"
+        if data.get("director"):
+            text += f"\n\n🎬 {t('label_director', lang)}: {data['director']}"
+        cast = data.get("cast", [])
+        if cast:
+            names = ", ".join(c.get("name", "") for c in cast[:4] if c.get("name"))
+            if names:
+                text += f"\n🌟 {t('label_cast', lang)}: {names}"
+        if overview:
+            text += f"\n\n📝 {overview}"
+        if data.get("trailer_url"):
+            text += f"\n\n🎥 [Trailer]({data['trailer_url']})"
+
+        await callback.message.answer(text, parse_mode="Markdown")
+
+    except Exception as exc:
+        logger.error(f"Movie detail error: {exc}", exc_info=True)
         await callback.message.answer(t("error", lang))
-        return
-
-    title = data.get("title", "")
-    rd = data.get("release_date", "")
-    year = rd[:4] if rd else "?"
-    vote = data.get("vote_average", 0)
-    genres = " · ".join(data.get("genres", [])[:3])
-    overview = (data.get("overview") or "")[:200]
-
-    text = (
-        f"🎬 *{title}* `({year})`\n"
-        f"⭐ `{vote}/10`  ·  🎭 {genres}\n"
-        f"📅 {rd}"
-    )
-    if data.get("runtime"):
-        text += f"  ·  ⏱ {data['runtime']} min"
-    if data.get("tagline"):
-        text += f"\n\n_{data['tagline']}_"
-    if data.get("director"):
-        text += f"\n\n🎬 {t('label_director', lang)}: {data['director']}"
-    if data.get("cast"):
-        names = ", ".join(c["name"] for c in data["cast"][:4])
-        text += f"\n🌟 {t('label_cast', lang)}: {names}"
-    if overview:
-        text += f"\n\n📝 {overview}"
-    if data.get("trailer_url"):
-        text += f"\n\n🎥 [Trailer]({data['trailer_url']})"
-
-    await callback.message.answer(text, parse_mode="Markdown")
 
 
 def register_movies_handlers(dp) -> None:
@@ -9033,6 +9066,9 @@ _STOCK_KW   = {"سهم", "اسهم", "stock", "stocks", "بورصة", "nasdaq", 
 _CRYPTO_KW  = {"بيتكوين", "bitcoin", "كريبتو", "crypto", "ethereum", "ايثريوم", "btc", "eth",
                "عملات رقمية", "بيتكوين"}
 _NEWS_KW    = {"اخبار", "خبر", "news", "أخبار", "اخر الاخبار", "latest news"}
+_MOVIE_KW   = {"فيلم", "أفلام", "افلام", "سينما", "مسلسل", "أنيمي", "أنمي",
+               "movie", "movies", "film", "cinema", "series", "anime", "cartoon",
+               "trending movies", "what to watch"}
 
 # Arabic stop words to strip when extracting city from weather query
 _WEATHER_STOP = {
@@ -9165,9 +9201,13 @@ _MAX_HIST = 10
 _HISTORY_TTL = 1800  # 30 minutes in seconds
 
 def _history_prune(uid: int) -> None:
-    """Drop entries older than 30 min and reset history if all entries expired."""
+    """Drop entries older than 30 min; remove the key entirely when empty."""
     cutoff = time.time() - _HISTORY_TTL
-    _USER_HISTORY[uid] = [m for m in _USER_HISTORY[uid] if m.get("ts", 0) > cutoff]
+    pruned = [m for m in _USER_HISTORY.get(uid, []) if m.get("ts", 0) > cutoff]
+    if pruned:
+        _USER_HISTORY[uid] = pruned
+    else:
+        _USER_HISTORY.pop(uid, None)
 
 def _history_add(uid: int, role: str, text: str) -> None:
     _USER_HISTORY[uid].append({"role": role, "content": text[:400], "ts": time.time()})
@@ -9345,6 +9385,17 @@ async def _route_to_service(message: Message, query: str, lang: str) -> bool:
             await message.answer(t("error", lang))
             return True
 
+    # Movies & TV
+    if _has_kw(query, _MOVIE_KW):
+        try:
+            from handlers.movies import cmd_movie
+            await cmd_movie(message, lang=lang)
+            return True
+        except Exception as exc:
+            logger.debug(f"Movies routing error: {exc}")
+            await message.answer(t("error", lang))
+            return True
+
     return False
 
 
@@ -9432,6 +9483,7 @@ async def process_ai_query(message: Message, query: str, lang: str = "en") -> No
 
 
 _VISION_PROVIDERS = [
+    {"provider": "gemini",     "model": "gemini-2.5-flash"},
     {"provider": "gemini",     "model": "gemini-2.0-flash"},
     {"provider": "openrouter", "model": "google/gemini-2.0-flash-exp:free"},
     {"provider": "openrouter", "model": "qwen/qwen2.5-vl-72b-instruct:free"},
@@ -9462,7 +9514,19 @@ async def _analyze_image(img_b64: str, caption: str, system_text: str) -> str:
                 async with httpx.AsyncClient(timeout=30) as client:
                     resp = await client.post(url, json=payload)
                     resp.raise_for_status()
-                    return resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+                    data = resp.json()
+                    candidates = data.get("candidates") or []
+                    if not candidates:
+                        continue
+                    text = (
+                        candidates[0]
+                        .get("content", {})
+                        .get("parts", [{}])[0]
+                        .get("text", "")
+                    )
+                    if text:
+                        return text
+                    continue
 
             elif provider == "openrouter":
                 key = settings.openrouter_api_key
@@ -9483,7 +9547,13 @@ async def _analyze_image(img_b64: str, caption: str, system_text: str) -> str:
                         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
                     )
                     resp.raise_for_status()
-                    return resp.json()["choices"][0]["message"]["content"]
+                    choices = resp.json().get("choices") or []
+                    if not choices:
+                        continue
+                    text = choices[0].get("message", {}).get("content", "")
+                    if text:
+                        return text
+                    continue
 
         except Exception as exc:
             logger.debug(f"Vision {provider}/{model} failed: {exc}")
@@ -10031,9 +10101,12 @@ async def _stream_to_tmp(dl_url: str) -> Optional[str]:
                     os.unlink(path)
                     return None
                 cl = resp.headers.get("content-length")
-                if cl and int(cl) > _MAX_TG_BYTES:
-                    os.unlink(path)
-                    return None
+                try:
+                    if cl and int(cl) > _MAX_TG_BYTES:
+                        os.unlink(path)
+                        return None
+                except (ValueError, TypeError):
+                    pass
                 with open(path, "wb") as f:
                     async for chunk in resp.aiter_bytes(chunk_size=65536):
                         written += len(chunk)
@@ -10329,6 +10402,13 @@ router = Router(name="transcriber")
 
 _GROQ_STT_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 _GROQ_MODEL = "whisper-large-v3"
+_AUDIO_MIME: dict[str, str] = {
+    "ogg": "audio/ogg", "oga": "audio/ogg", "opus": "audio/ogg",
+    "mp3": "audio/mpeg", "mpga": "audio/mpeg",
+    "m4a": "audio/mp4", "mp4": "audio/mp4",
+    "wav": "audio/wav", "flac": "audio/flac",
+    "webm": "audio/webm", "aac": "audio/aac",
+}
 _GEMINI_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models"
     "/gemini-2.0-flash:generateContent"
@@ -10338,11 +10418,13 @@ _SUMMARY_THRESHOLD = 500
 
 async def _transcribe(audio_path: str) -> str:
     async with httpx.AsyncClient(timeout=120) as client:
+        ext_lower = os.path.splitext(audio_path)[1].lstrip(".").lower()
+        mime = _AUDIO_MIME.get(ext_lower, "audio/mpeg")
         with open(audio_path, "rb") as fh:
             resp = await client.post(
                 _GROQ_STT_URL,
                 headers={"Authorization": f"Bearer {settings.groq_api_key}"},
-                files={"file": (os.path.basename(audio_path), fh, "audio/ogg")},
+                files={"file": (os.path.basename(audio_path), fh, mime)},
                 data={"model": _GROQ_MODEL, "response_format": "text"},
             )
         resp.raise_for_status()
@@ -10446,9 +10528,9 @@ async def _process(message: Message, file_id: str, ext: str, lang: str) -> None:
     except Exception as exc:
         logger.error(f"Transcription error: {exc}", exc_info=True)
         err = (
-            f"❌ فشل النسخ: {type(exc).__name__}"
+            "❌ فشل النسخ. تأكد من أن الملف يحتوي على صوت واضح وحاول مجدداً."
             if lang == "ar"
-            else f"❌ Transcription failed: {type(exc).__name__}"
+            else "❌ Transcription failed. Make sure the file has clear audio and try again."
         )
         try:
             await wait_msg.edit_text(err)

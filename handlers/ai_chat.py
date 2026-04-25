@@ -61,6 +61,9 @@ _STOCK_KW   = {"سهم", "اسهم", "stock", "stocks", "بورصة", "nasdaq", 
 _CRYPTO_KW  = {"بيتكوين", "bitcoin", "كريبتو", "crypto", "ethereum", "ايثريوم", "btc", "eth",
                "عملات رقمية", "بيتكوين"}
 _NEWS_KW    = {"اخبار", "خبر", "news", "أخبار", "اخر الاخبار", "latest news"}
+_MOVIE_KW   = {"فيلم", "أفلام", "افلام", "سينما", "مسلسل", "أنيمي", "أنمي",
+               "movie", "movies", "film", "cinema", "series", "anime", "cartoon",
+               "trending movies", "what to watch"}
 
 # Arabic stop words to strip when extracting city from weather query
 _WEATHER_STOP = {
@@ -193,9 +196,13 @@ _MAX_HIST = 10
 _HISTORY_TTL = 1800  # 30 minutes in seconds
 
 def _history_prune(uid: int) -> None:
-    """Drop entries older than 30 min and reset history if all entries expired."""
+    """Drop entries older than 30 min; remove the key entirely when empty."""
     cutoff = time.time() - _HISTORY_TTL
-    _USER_HISTORY[uid] = [m for m in _USER_HISTORY[uid] if m.get("ts", 0) > cutoff]
+    pruned = [m for m in _USER_HISTORY.get(uid, []) if m.get("ts", 0) > cutoff]
+    if pruned:
+        _USER_HISTORY[uid] = pruned
+    else:
+        _USER_HISTORY.pop(uid, None)
 
 def _history_add(uid: int, role: str, text: str) -> None:
     _USER_HISTORY[uid].append({"role": role, "content": text[:400], "ts": time.time()})
@@ -375,6 +382,17 @@ async def _route_to_service(message: Message, query: str, lang: str) -> bool:
             await message.answer(t("error", lang))
             return True
 
+    # Movies & TV
+    if _has_kw(query, _MOVIE_KW):
+        try:
+            from handlers.movies import cmd_movie
+            await cmd_movie(message, lang=lang)
+            return True
+        except Exception as exc:
+            logger.debug(f"Movies routing error: {exc}")
+            await message.answer(t("error", lang))
+            return True
+
     return False
 
 
@@ -462,6 +480,7 @@ async def process_ai_query(message: Message, query: str, lang: str = "en") -> No
 
 
 _VISION_PROVIDERS = [
+    {"provider": "gemini",     "model": "gemini-2.5-flash"},
     {"provider": "gemini",     "model": "gemini-2.0-flash"},
     {"provider": "openrouter", "model": "google/gemini-2.0-flash-exp:free"},
     {"provider": "openrouter", "model": "qwen/qwen2.5-vl-72b-instruct:free"},
@@ -492,7 +511,19 @@ async def _analyze_image(img_b64: str, caption: str, system_text: str) -> str:
                 async with httpx.AsyncClient(timeout=30) as client:
                     resp = await client.post(url, json=payload)
                     resp.raise_for_status()
-                    return resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+                    data = resp.json()
+                    candidates = data.get("candidates") or []
+                    if not candidates:
+                        continue
+                    text = (
+                        candidates[0]
+                        .get("content", {})
+                        .get("parts", [{}])[0]
+                        .get("text", "")
+                    )
+                    if text:
+                        return text
+                    continue
 
             elif provider == "openrouter":
                 key = settings.openrouter_api_key
@@ -513,7 +544,13 @@ async def _analyze_image(img_b64: str, caption: str, system_text: str) -> str:
                         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
                     )
                     resp.raise_for_status()
-                    return resp.json()["choices"][0]["message"]["content"]
+                    choices = resp.json().get("choices") or []
+                    if not choices:
+                        continue
+                    text = choices[0].get("message", {}).get("content", "")
+                    if text:
+                        return text
+                    continue
 
         except Exception as exc:
             logger.debug(f"Vision {provider}/{model} failed: {exc}")

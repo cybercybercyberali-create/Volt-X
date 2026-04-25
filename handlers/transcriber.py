@@ -18,6 +18,13 @@ router = Router(name="transcriber")
 
 _GROQ_STT_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 _GROQ_MODEL = "whisper-large-v3"
+_AUDIO_MIME: dict[str, str] = {
+    "ogg": "audio/ogg", "oga": "audio/ogg", "opus": "audio/ogg",
+    "mp3": "audio/mpeg", "mpga": "audio/mpeg",
+    "m4a": "audio/mp4", "mp4": "audio/mp4",
+    "wav": "audio/wav", "flac": "audio/flac",
+    "webm": "audio/webm", "aac": "audio/aac",
+}
 _GEMINI_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models"
     "/gemini-2.0-flash:generateContent"
@@ -28,11 +35,13 @@ _SUMMARY_THRESHOLD = 500  # chars
 async def _transcribe(audio_path: str) -> str:
     """Send audio file to Groq Whisper; return transcript text."""
     async with httpx.AsyncClient(timeout=120) as client:
+        ext_lower = os.path.splitext(audio_path)[1].lstrip(".").lower()
+        mime = _AUDIO_MIME.get(ext_lower, "audio/mpeg")
         with open(audio_path, "rb") as fh:
             resp = await client.post(
                 _GROQ_STT_URL,
                 headers={"Authorization": f"Bearer {settings.groq_api_key}"},
-                files={"file": (os.path.basename(audio_path), fh, "audio/ogg")},
+                files={"file": (os.path.basename(audio_path), fh, mime)},
                 data={"model": _GROQ_MODEL, "response_format": "text"},
             )
         resp.raise_for_status()
@@ -145,9 +154,9 @@ async def _process(message: Message, file_id: str, ext: str, lang: str) -> None:
     except Exception as exc:
         logger.error(f"Transcription error: {exc}", exc_info=True)
         err = (
-            f"❌ فشل النسخ: {type(exc).__name__}"
+            "❌ فشل النسخ. تأكد من أن الملف يحتوي على صوت واضح وحاول مجدداً."
             if lang == "ar"
-            else f"❌ Transcription failed: {type(exc).__name__}"
+            else "❌ Transcription failed. Make sure the file has clear audio and try again."
         )
         try:
             await wait_msg.edit_text(err)

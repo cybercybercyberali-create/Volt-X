@@ -143,9 +143,12 @@ async def _stream_to_tmp(dl_url: str) -> Optional[str]:
                     return None
                 # Check Content-Length header early to skip huge files fast
                 cl = resp.headers.get("content-length")
-                if cl and int(cl) > _MAX_TG_BYTES:
-                    os.unlink(path)
-                    return None
+                try:
+                    if cl and int(cl) > _MAX_TG_BYTES:
+                        os.unlink(path)
+                        return None
+                except (ValueError, TypeError):
+                    pass
                 with open(path, "wb") as f:
                     async for chunk in resp.aiter_bytes(chunk_size=65536):
                         written += len(chunk)

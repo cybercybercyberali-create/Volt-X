@@ -123,6 +123,29 @@ async def cmd_movie(message: Message, lang: str = "en") -> None:
         await message.answer(t("error", lang))
 
 
+@router.message(Command("trending"))
+async def cmd_trending(message: Message, lang: str = "en") -> None:
+    wait = await message.answer(
+        "⏳ جارٍ تحميل الأكثر مشاهدةً..." if lang == "ar"
+        else "⏳ Loading trending movies..."
+    )
+    try:
+        tmdb_lang = "ar" if lang == "ar" else "en-US"
+        data = await omega_movies.get_trending(lang=tmdb_lang)
+        if data.get("error") or not data.get("results"):
+            await wait.edit_text(t("not_found", lang))
+            return
+        await wait.delete()
+        for item in data["results"][:5]:
+            await _send_card(message, item, lang)
+    except Exception as exc:
+        logger.error(f"Trending error: {exc}", exc_info=True)
+        try:
+            await wait.edit_text(t("error", lang))
+        except Exception:
+            pass
+
+
 @router.callback_query(lambda c: c.data and c.data.startswith("mv_g:"))
 async def handle_genre_cb(callback: CallbackQuery, lang: str = "en") -> None:
     await callback.answer("⏳")
@@ -131,13 +154,16 @@ async def handle_genre_cb(callback: CallbackQuery, lang: str = "en") -> None:
     except (IndexError, ValueError):
         return
 
-    data = await omega_movies.get_by_genre(genre_id, lang=lang)
-    if data.get("error") or not data.get("results"):
-        await callback.message.answer(t("not_found", lang))
-        return
-
-    for item in data["results"][:5]:
-        await _send_card(callback.message, item, lang)
+    try:
+        data = await omega_movies.get_by_genre(genre_id, lang=lang)
+        if data.get("error") or not data.get("results"):
+            await callback.message.answer(t("not_found", lang))
+            return
+        for item in data["results"][:5]:
+            await _send_card(callback.message, item, lang)
+    except Exception as exc:
+        logger.error(f"Genre movies error: {exc}", exc_info=True)
+        await callback.message.answer(t("error", lang))
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("mv:"))
@@ -151,39 +177,47 @@ async def handle_mv_cb(callback: CallbackQuery, lang: str = "en") -> None:
     except (ValueError, IndexError):
         return
 
-    data = await omega_movies.get_details(tmdb_id, media_type)
-    if data.get("error"):
+    try:
+        data = await omega_movies.get_details(tmdb_id, media_type)
+        if data.get("error"):
+            await callback.message.answer(t("error", lang))
+            return
+
+        title = data.get("title", "")
+        rd = data.get("release_date", "")
+        year = rd[:4] if rd else "?"
+        vote = data.get("vote_average", 0)
+        genres = " · ".join(data.get("genres", [])[:3])
+        overview = (data.get("overview") or "")[:200]
+
+        text = (
+            f"🎬 *{title}* `({year})`\n"
+            f"⭐ `{vote}/10`  ·  🎭 {genres}\n"
+            f"📅 {rd}"
+        )
+        if data.get("runtime"):
+            text += f"  ·  ⏱ {data['runtime']} min"
+        if data.get("tagline"):
+            text += f"\n\n_{data['tagline']}_"
+        if data.get("director"):
+            text += f"\n\n🎬 {t('label_director', lang)}: {data['director']}"
+        cast = data.get("cast", [])
+        if cast:
+            names = ", ".join(c.get("name", "") for c in cast[:4] if c.get("name"))
+            if names:
+                text += f"\n🌟 {t('label_cast', lang)}: {names}"
+        if overview:
+            text += f"\n\n📝 {overview}"
+        if data.get("trailer_url"):
+            text += f"\n\n🎥 [Trailer]({data['trailer_url']})"
+
+        await callback.message.answer(text, parse_mode="Markdown")
+
+    except Exception as exc:
+        logger.error(f"Movie detail error: {exc}", exc_info=True)
         await callback.message.answer(t("error", lang))
-        return
-
-    title = data.get("title", "")
-    rd = data.get("release_date", "")
-    year = rd[:4] if rd else "?"
-    vote = data.get("vote_average", 0)
-    genres = " · ".join(data.get("genres", [])[:3])
-    overview = (data.get("overview") or "")[:200]
-
-    text = (
-        f"🎬 *{title}* `({year})`\n"
-        f"⭐ `{vote}/10`  ·  🎭 {genres}\n"
-        f"📅 {rd}"
-    )
-    if data.get("runtime"):
-        text += f"  ·  ⏱ {data['runtime']} min"
-    if data.get("tagline"):
-        text += f"\n\n_{data['tagline']}_"
-    if data.get("director"):
-        text += f"\n\n🎬 {t('label_director', lang)}: {data['director']}"
-    if data.get("cast"):
-        names = ", ".join(c["name"] for c in data["cast"][:4])
-        text += f"\n🌟 {t('label_cast', lang)}: {names}"
-    if overview:
-        text += f"\n\n📝 {overview}"
-    if data.get("trailer_url"):
-        text += f"\n\n🎥 [Trailer]({data['trailer_url']})"
-
-    await callback.message.answer(text, parse_mode="Markdown")
 
 
 def register_movies_handlers(dp) -> None:
     dp.include_router(router)
+
