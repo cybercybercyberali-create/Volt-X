@@ -4428,37 +4428,38 @@ _COUNTRY_NAMES: dict[str, tuple[str, str]] = {
 }
 
 # Static pump prices (USD/L) — April 2026; used when live scraping fails.
+# NOTE: Global prices spiked significantly due to Iran-Israel conflict (Feb-Apr 2026).
 _STATIC_FUEL_PRICES: dict[str, dict] = {
-    # Gulf — government-subsidized diesel
-    "SA": {"بنزين 91": "0.208 USD/L", "بنزين 95": "0.240 USD/L", "ديزل": "0.067 USD/L"},
-    "AE": {"بنزين 91 (E-Plus)": "0.734 USD/L", "بنزين 95 (Special)": "0.771 USD/L", "بنزين 98 (Super)": "0.802 USD/L", "ديزل": "0.748 USD/L"},
-    "KW": {"بنزين 91 (Premium)": "0.197 USD/L", "بنزين 95 (Super)": "0.230 USD/L", "ديزل": "0.197 USD/L"},
-    "QA": {"بنزين 91 (Special)": "0.449 USD/L", "بنزين 95 (Premium)": "0.461 USD/L", "ديزل": "0.449 USD/L"},
-    "BH": {"بنزين 91": "0.316 USD/L", "بنزين 95": "0.343 USD/L", "ديزل": "0.270 USD/L"},
-    "OM": {"بنزين 91": "0.468 USD/L", "بنزين 95": "0.494 USD/L", "ديزل": "0.442 USD/L"},
+    # Gulf — government-set quarterly prices (Q2 April 2026 — Aramco/ADNOC/QatarEnergy)
+    "SA": {"بنزين 91": "0.581 USD/L", "بنزين 95": "0.621 USD/L", "ديزل": "0.477 USD/L"},
+    "AE": {"بنزين 91 (E-Plus)": "0.831 USD/L", "بنزين 95 (Special)": "0.894 USD/L", "بنزين 98 (Super)": "0.924 USD/L", "ديزل": "1.278 USD/L"},
+    "KW": {"بنزين 91 (Premium)": "0.277 USD/L", "بنزين 95 (Special)": "0.342 USD/L", "ديزل": "0.375 USD/L"},
+    "QA": {"بنزين 91 (Premium)": "0.508 USD/L", "بنزين 95 (Super)": "0.563 USD/L", "ديزل": "0.500 USD/L"},
+    "BH": {"بنزين 91": "0.370 USD/L", "بنزين 95": "0.400 USD/L", "ديزل": "0.320 USD/L"},
+    "OM": {"بنزين 91": "0.530 USD/L", "بنزين 95": "0.560 USD/L", "ديزل": "0.500 USD/L"},
     # Levant & North Africa
-    "EG": {"بنزين 92": "0.282 USD/L", "بنزين 95": "0.338 USD/L", "ديزل": "0.175 USD/L"},
-    "JO": {"بنزين 90": "1.078 USD/L", "بنزين 95": "1.250 USD/L", "ديزل": "1.295 USD/L"},
+    "EG": {"بنزين 92": "0.436 USD/L", "بنزين 95": "0.471 USD/L", "ديزل": "0.230 USD/L"},
+    "JO": {"بنزين 90": "1.130 USD/L", "بنزين 95": "1.350 USD/L", "ديزل": "1.270 USD/L"},
     "IQ": {"بنزين": "0.307 USD/L", "ديزل": "0.230 USD/L"},
     "SY": {"بنزين": "0.230 USD/L", "ديزل": "0.180 USD/L"},
-    "PS": {"بنزين 95": "1.420 USD/L", "ديزل": "1.380 USD/L"},
+    "PS": {"بنزين 95": "1.550 USD/L", "ديزل": "1.500 USD/L"},
     "DZ": {"بنزين": "0.277 USD/L", "ديزل": "0.166 USD/L"},
-    "MA": {"بنزين 95": "1.250 USD/L", "ديزل": "1.030 USD/L"},
-    "TN": {"بنزين 91": "0.830 USD/L", "بنزين 95": "0.910 USD/L", "ديزل": "0.700 USD/L"},
+    "MA": {"بنزين 95": "1.566 USD/L", "ديزل": "1.667 USD/L"},
+    "TN": {"بنزين 91": "0.900 USD/L", "بنزين 95": "0.980 USD/L", "ديزل": "0.780 USD/L"},
     "LY": {"بنزين": "0.031 USD/L", "ديزل": "0.021 USD/L"},
     "SD": {"بنزين": "0.640 USD/L", "ديزل": "0.550 USD/L"},
     "YE": {"بنزين": "0.530 USD/L", "ديزل": "0.470 USD/L"},
     # Europe & Global
-    "TR": {"بنزين 95": "1.290 USD/L", "ديزل": "1.170 USD/L"},
+    "TR": {"بنزين 95": "1.592 USD/L", "ديزل": "1.744 USD/L"},
     "US": {"Gasoline (Regular)": "1.070 USD/L", "Diesel": "1.427 USD/L"},
-    "DE": {"Super E10 (95)": "1.760 USD/L", "Diesel": "1.620 USD/L"},
-    "FR": {"SP95-E10": "1.710 USD/L", "Diesel": "1.560 USD/L"},
-    "GB": {"Petrol E10": "1.660 USD/L", "Diesel": "1.700 USD/L"},
-    "JP": {"Regular": "1.210 USD/L", "Diesel": "1.160 USD/L"},
-    "IN": {"Petrol": "1.310 USD/L", "Diesel": "1.110 USD/L"},
-    "BR": {"Gasoline": "1.180 USD/L", "Diesel": "0.980 USD/L"},
-    "RU": {"AI-95": "0.630 USD/L", "Diesel": "0.590 USD/L"},
-    "CN": {"No. 92": "1.060 USD/L", "Diesel": "1.000 USD/L"},
+    "DE": {"Super E10 (95)": "2.393 USD/L", "Diesel": "2.424 USD/L"},
+    "FR": {"SP95-E10": "2.298 USD/L", "Diesel": "2.483 USD/L"},
+    "GB": {"Petrol E10": "2.082 USD/L", "Diesel": "2.515 USD/L"},
+    "JP": {"Regular": "1.154 USD/L", "Diesel": "1.228 USD/L"},
+    "IN": {"Petrol": "1.141 USD/L", "Diesel": "1.057 USD/L"},
+    "BR": {"Gasoline": "1.158 USD/L", "Diesel": "1.191 USD/L"},
+    "RU": {"AI-95": "0.809 USD/L", "Diesel": "0.905 USD/L"},
+    "CN": {"No. 92": "1.182 USD/L", "Diesel": "1.137 USD/L"},
 }
 
 ARAB_FUEL_SOURCES = {
@@ -5026,7 +5027,7 @@ class OmegaFuel:
         return None
 
     async def _fetch_country_gpp_page(self, country_code: str) -> dict | None:
-        """Fetch per-country GPP page via ScraperAPI — more targeted than bulk listing."""
+        """Fetch per-country GPP page via ScraperAPI — extracts price from embedded JS chart data."""
         import httpx as _httpx, re as _re
         from bs4 import BeautifulSoup
         from config import settings as _cfg
@@ -5045,12 +5046,45 @@ class OmegaFuel:
                     )
                 if r.status_code != 200 or len(r.text) < 500:
                     continue
-                soup = BeautifulSoup(r.text, "lxml")
-                for el in soup.select("td, .graph-price, [class*='price'], strong, b"):
+                html = r.text
+                # GPP embeds price history in a JS array: [["YYYY-MM-DD", usd_val, local_val], ...]
+                # The last entry is the most recent price in USD/L
+                m = _re.search(r'var\s+(?:chart|data|chartData|prices)\s*=\s*(\[\[.*?\]\])', html, _re.DOTALL)
+                if m:
+                    try:
+                        import json as _json
+                        rows = _json.loads(m.group(1))
+                        for row in reversed(rows):
+                            if len(row) >= 2 and row[1] is not None:
+                                val = float(row[1])
+                                if 0.01 < val < 10.0:
+                                    results[label] = f"{val:.3f} USD/L"
+                                    break
+                        if label in results:
+                            continue
+                    except Exception:
+                        pass
+                # Fallback: scan <script> tags for date+price pattern
+                soup = BeautifulSoup(html, "lxml")
+                for script in soup.find_all("script"):
+                    txt = script.string or ""
+                    hits = _re.findall(r'\["20\d\d-\d\d-\d\d",\s*([\d.]+)', txt)
+                    if hits:
+                        try:
+                            val = float(hits[-1])
+                            if 0.01 < val < 10.0:
+                                results[label] = f"{val:.3f} USD/L"
+                                break
+                        except Exception:
+                            pass
+                if label in results:
+                    continue
+                # Last resort: any price-like number in table cells
+                for el in soup.select("table td"):
                     txt = el.get_text(strip=True).replace(",", ".")
-                    m = _re.search(r'\b(\d+\.\d{3,4})\b', txt)
-                    if m:
-                        val = float(m.group(1))
+                    m2 = _re.search(r'(?<!\d)(\d+\.\d{2,4})(?!\d)', txt)
+                    if m2:
+                        val = float(m2.group(1))
                         if 0.01 < val < 10.0:
                             results[label] = f"{val:.3f} USD/L"
                             break
