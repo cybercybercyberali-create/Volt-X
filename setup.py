@@ -5108,6 +5108,7 @@ class OmegaFuel:
                 "prices":          prices or {},
                 "source":          source,
                 "stale":           stale,
+                "fetched_at":      datetime.now(timezone.utc).isoformat(),
                 "error":           False,
             }
 
@@ -8144,11 +8145,14 @@ async def _show_fuel(send_to: Message, country: str, lang: str) -> None:
                 if fuel_type != "note":
                     text += f"  🔹 {fuel_type}: {price}\n"
         if data.get("stale"):
-            text += (
-                "\n⚠️ آخر بيانات معروفة — أبريل 2026"
-                if lang == "ar"
-                else "\n⚠️ Last known data — April 2026"
-            )
+            from datetime import datetime as _dt, timezone as _tz
+            _fetched = data.get("fetched_at", "")
+            try:
+                _d = _dt.fromisoformat(_fetched).astimezone(_tz.utc)
+                _date_str = _d.strftime("%-d %b %Y %H:%M UTC")
+            except Exception:
+                _date_str = _dt.now(_tz.utc).strftime("%-d %b %Y")
+            text += f"\n⚠️ {'مرجعي — ' if lang == 'ar' else 'Reference — '}{_date_str}"
         if data.get("note"):
             text += f"\n{t('label_note', lang)}: {data['note']}"
         try:

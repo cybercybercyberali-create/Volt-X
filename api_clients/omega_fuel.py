@@ -710,6 +710,7 @@ class OmegaFuel:
                 "prices":          prices or {},
                 "source":          source,
                 "stale":           stale,
+                "fetched_at":      datetime.now(timezone.utc).isoformat(),
                 "error":           False,
             }
 
