@@ -95,6 +95,9 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(_crypto_refresh_loop())
     asyncio.create_task(_metals_refresh_loop())
     asyncio.create_task(_news_refresh_loop())
+    asyncio.create_task(_quakes_refresh_loop())
+    asyncio.create_task(_stocks_refresh_loop())
+    asyncio.create_task(_weather_refresh_loop())
     logger.info("✅ All background refresh tasks started")
 
     from workers.notification_worker import notification_worker
@@ -188,7 +191,7 @@ async def _clear_fuel_caches():
 
 
 async def _clear_stale_team_caches():
-    """One-time flush of all league team caches on startup — remove after first deploy."""
+    """One-time flush of all league team caches on startup."""
     from services.cache_service import cache as _cache
     await asyncio.sleep(5)
     keys = [
@@ -273,7 +276,10 @@ async def _currency_refresh_loop():
 async def _crypto_refresh_loop():
     """Pre-warm top crypto prices every 30 minutes."""
     from api_clients.omega_crypto import omega_crypto
-    _TOP = ["bitcoin", "ethereum", "binancecoin", "solana", "ripple", "dogecoin"]
+    _TOP = [
+        "bitcoin", "ethereum", "binancecoin", "solana", "ripple",
+        "dogecoin", "cardano", "tron", "avalanche-2", "polkadot",
+    ]
     await asyncio.sleep(105)
     while True:
         for coin in _TOP:
@@ -311,6 +317,54 @@ async def _news_refresh_loop():
             logger.info("✅ News refreshed (AR + EN)")
         except Exception as exc:
             logger.debug(f"News refresh: {exc}")
+        await asyncio.sleep(1800)
+
+
+async def _quakes_refresh_loop():
+    """Pre-warm recent earthquakes every 10 minutes."""
+    from api_clients.omega_quakes import omega_quakes
+    await asyncio.sleep(165)
+    while True:
+        try:
+            await omega_quakes.get_recent(min_magnitude=4.0, limit=20)
+            logger.info("✅ Quakes refreshed")
+        except Exception as exc:
+            logger.debug(f"Quakes refresh: {exc}")
+        await asyncio.sleep(600)
+
+
+async def _stocks_refresh_loop():
+    """Pre-warm popular stock quotes every 15 minutes."""
+    from api_clients.omega_stocks import omega_stocks
+    _TICKERS = ["AAPL", "NVDA", "MSFT", "TSLA", "META", "AMZN", "GOOGL", "2222.SR"]
+    await asyncio.sleep(180)
+    while True:
+        for ticker in _TICKERS:
+            try:
+                await omega_stocks.get_quote(ticker)
+                await asyncio.sleep(2)
+            except Exception as exc:
+                logger.debug(f"Stocks refresh {ticker}: {exc}")
+        logger.info("✅ Stocks refreshed")
+        await asyncio.sleep(900)
+
+
+async def _weather_refresh_loop():
+    """Pre-warm weather for major Arab cities every 30 minutes."""
+    from api_clients.omega_weather import omega_weather
+    _CITIES = [
+        "Beirut", "Cairo", "Dubai", "Riyadh",
+        "Amman", "Baghdad", "Doha", "Kuwait City",
+    ]
+    await asyncio.sleep(195)
+    while True:
+        for city in _CITIES:
+            try:
+                await omega_weather.get_weather(city, lang="ar")
+                await asyncio.sleep(2)
+            except Exception as exc:
+                logger.debug(f"Weather refresh {city}: {exc}")
+        logger.info("✅ Weather refreshed for major cities")
         await asyncio.sleep(1800)
 
 
