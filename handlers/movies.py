@@ -1,3 +1,4 @@
+import html
 import logging
 import re
 
@@ -28,6 +29,11 @@ _GENRES = [
 ]
 
 
+def _e(s) -> str:
+    """HTML-escape any external API string to prevent formatting crashes."""
+    return html.escape(str(s or ""))
+
+
 def _genre_kb(lang: str) -> InlineKeyboardMarkup:
     btns = [
         InlineKeyboardButton(
@@ -56,25 +62,27 @@ def _item_year(item: dict) -> int | None:
 
 
 def _caption(item: dict) -> str:
-    """Clean text-only card — no poster."""
-    title = item.get("title", "")
+    """HTML-safe card for search/browse results."""
+    title = _e(item.get("title", ""))
     rd = item.get("release_date", "")
-    year = rd[:4] if rd else "?"
+    year = _e(rd[:4] if rd else "?")
     vote = item.get("vote_average", 0)
     genres = item.get("genres", [])
-    genres_str = " · ".join(genres[:2]) if genres else "—"
+    genres_str = _e(" · ".join(genres[:2]) if genres else "—")
     overview = (item.get("overview") or "")
-    preview = overview[:180] + ("..." if len(overview) > 180 else "")
+    preview = _e(overview[:200] + ("..." if len(overview) > 200 else ""))
     return (
-        f"🎬 *{title}* `({year})`\n"
-        f"⭐ `{vote}/10`  ·  🎭 {genres_str}\n"
+        f"🎬 <b>{title}</b> <code>({year})</code>\n"
+        f"⭐ <code>{vote}/10</code>  ·  🎭 {genres_str}\n"
         f"📝 {preview}"
     )
 
 
 async def _send_card(msg: Message, item: dict, lang: str) -> None:
-    cap = _caption(item)
-    await msg.answer(cap, parse_mode="Markdown")
+    try:
+        await msg.answer(_caption(item), parse_mode="HTML")
+    except Exception as exc:
+        logger.warning(f"send_card error: {exc}")
 
 
 @router.message(Command("movie"))
@@ -85,16 +93,14 @@ async def cmd_movie(message: Message, lang: str = "en") -> None:
             raw = raw[len(prefix):].strip()
             break
 
-    # No query → show genre selector
     if not raw:
-        prompt = "🎬 *اختر النوع أو ابحث باسم الفيلم:*" if lang == "ar" \
-            else "🎬 *Pick a genre or search by name:*"
-        await message.answer(prompt, parse_mode="Markdown", reply_markup=_genre_kb(lang))
+        prompt = "🎬 <b>اختر النوع أو ابحث باسم الفيلم:</b>" if lang == "ar" \
+            else "🎬 <b>Pick a genre or search by name:</b>"
+        await message.answer(prompt, parse_mode="HTML", reply_markup=_genre_kb(lang))
         return
 
     query, requested_year = _extract_year(raw)
-    if not query:
-        query = raw
+    query = query or raw  # keep original if year-strip left nothing
 
     try:
         data = await omega_movies.search(query)
@@ -106,12 +112,12 @@ async def cmd_movie(message: Message, lang: str = "en") -> None:
         if requested_year is not None:
             filtered = [r for r in results if _item_year(r) == requested_year]
             if not filtered:
-                no_result = (
+                msg = (
                     f"❌ لا توجد نتائج في {requested_year}"
                     if lang == "ar"
                     else f"❌ No results found for {requested_year}"
                 )
-                await message.answer(no_result)
+                await message.answer(msg)
                 return
             results = filtered
 
@@ -119,7 +125,7 @@ async def cmd_movie(message: Message, lang: str = "en") -> None:
             await _send_card(message, item, lang)
 
     except Exception as exc:
-        logger.error(f"Movie error: {exc}", exc_info=True)
+        logger.error(f"Movie search error: {exc}", exc_info=True)
         await message.answer(t("error", lang))
 
 
@@ -170,7 +176,7 @@ async def handle_genre_cb(callback: CallbackQuery, lang: str = "en") -> None:
 async def handle_mv_cb(callback: CallbackQuery, lang: str = "en") -> None:
     parts = callback.data.split(":")
     await callback.answer()
-    if parts[1] != "detail" or len(parts) < 4:
+    if len(parts) < 4 or parts[1] != "detail":
         return
     try:
         tmdb_id, media_type = int(parts[2]), parts[3]
@@ -183,35 +189,44 @@ async def handle_mv_cb(callback: CallbackQuery, lang: str = "en") -> None:
             await callback.message.answer(t("error", lang))
             return
 
-        title = data.get("title", "")
-        rd = data.get("release_date", "")
+        title = _e(data.get("title", ""))
+        rd = _e(data.get("release_date", ""))
         year = rd[:4] if rd else "?"
         vote = data.get("vote_average", 0)
-        genres = " · ".join(data.get("genres", [])[:3])
-        overview = (data.get("overview") or "")[:200]
+        genres = _e(" · ".join(data.get("genres", [])[:3]))
+        overview = _e((data.get("overview") or "")[:300])
 
-        text = (
-            f"🎬 *{title}* `({year})`\n"
-            f"⭐ `{vote}/10`  ·  🎭 {genres}\n"
-            f"📅 {rd}"
-        )
-        if data.get("runtime"):
-            text += f"  ·  ⏱ {data['runtime']} min"
-        if data.get("tagline"):
-            text += f"\n\n_{data['tagline']}_"
-        if data.get("director"):
-            text += f"\n\n🎬 {t('label_director', lang)}: {data['director']}"
+        lines = [
+            f"🎬 <b>{title}</b> <code>({year})</code>",
+            f"⭐ <code>{vote}/10</code>  ·  🎭 {genres}",
+            f"📅 {rd}",
+        ]
+        runtime = data.get("runtime") or 0
+        if runtime:
+            lines[-1] += f"  ·  ⏱ {runtime} min"
+
+        tagline = (data.get("tagline") or "").strip()
+        if tagline:
+            lines.append(f"\n<i>{_e(tagline)}</i>")
+
+        director = (data.get("director") or "").strip()
+        if director:
+            lines.append(f"\n🎬 {t('label_director', lang)}: {_e(director)}")
+
         cast = data.get("cast", [])
         if cast:
-            names = ", ".join(c.get("name", "") for c in cast[:4] if c.get("name"))
+            names = ", ".join(_e(c.get("name", "")) for c in cast[:4] if c.get("name"))
             if names:
-                text += f"\n🌟 {t('label_cast', lang)}: {names}"
-        if overview:
-            text += f"\n\n📝 {overview}"
-        if data.get("trailer_url"):
-            text += f"\n\n🎥 [Trailer]({data['trailer_url']})"
+                lines.append(f"🌟 {t('label_cast', lang)}: {names}")
 
-        await callback.message.answer(text, parse_mode="Markdown")
+        if overview:
+            lines.append(f"\n📝 {overview}")
+
+        trailer = (data.get("trailer_url") or "").strip()
+        if trailer and trailer.startswith("http"):
+            lines.append(f'\n🎥 <a href="{html.escape(trailer)}">Trailer</a>')
+
+        await callback.message.answer("\n".join(lines), parse_mode="HTML")
 
     except Exception as exc:
         logger.error(f"Movie detail error: {exc}", exc_info=True)
@@ -220,4 +235,3 @@ async def handle_mv_cb(callback: CallbackQuery, lang: str = "en") -> None:
 
 def register_movies_handlers(dp) -> None:
     dp.include_router(router)
-

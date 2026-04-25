@@ -8776,6 +8776,7 @@ def register_football_handlers(dp) -> None:
 '''
 
 FILES["handlers/movies.py"] = r'''
+import html
 import logging
 import re
 
@@ -8789,7 +8790,7 @@ from config import t
 logger = logging.getLogger(__name__)
 router = Router(name="movies")
 
-_YEAR_RE = re.compile(r"\b(19[0-9]{2}|20[0-9]{2})\b")
+_YEAR_RE = re.compile(r"(19[0-9]{2}|20[0-9]{2})")
 
 # Genre list: (tmdb_id, ar_label, en_label)
 _GENRES = [
@@ -8804,6 +8805,11 @@ _GENRES = [
     (80,    "🔫 جريمة",      "🔫 Crime"),
     (12,    "🌍 مغامرة",     "🌍 Adventure"),
 ]
+
+
+def _e(s) -> str:
+    """HTML-escape any external API string to prevent formatting crashes."""
+    return html.escape(str(s or ""))
 
 
 def _genre_kb(lang: str) -> InlineKeyboardMarkup:
@@ -8834,25 +8840,29 @@ def _item_year(item: dict) -> int | None:
 
 
 def _caption(item: dict) -> str:
-    """Clean text-only card — no poster."""
-    title = item.get("title", "")
+    """HTML-safe card for search/browse results."""
+    title = _e(item.get("title", ""))
     rd = item.get("release_date", "")
-    year = rd[:4] if rd else "?"
+    year = _e(rd[:4] if rd else "?")
     vote = item.get("vote_average", 0)
     genres = item.get("genres", [])
-    genres_str = " · ".join(genres[:2]) if genres else "—"
+    genres_str = _e(" · ".join(genres[:2]) if genres else "—")
     overview = (item.get("overview") or "")
-    preview = overview[:180] + ("..." if len(overview) > 180 else "")
+    preview = _e(overview[:200] + ("..." if len(overview) > 200 else ""))
     return (
-        f"🎬 *{title}* `({year})`\n"
-        f"⭐ `{vote}/10`  ·  🎭 {genres_str}\n"
+        f"🎬 <b>{title}</b> <code>({year})</code>
+"
+        f"⭐ <code>{vote}/10</code>  ·  🎭 {genres_str}
+"
         f"📝 {preview}"
     )
 
 
 async def _send_card(msg: Message, item: dict, lang: str) -> None:
-    cap = _caption(item)
-    await msg.answer(cap, parse_mode="Markdown")
+    try:
+        await msg.answer(_caption(item), parse_mode="HTML")
+    except Exception as exc:
+        logger.warning(f"send_card error: {exc}")
 
 
 @router.message(Command("movie"))
@@ -8863,16 +8873,14 @@ async def cmd_movie(message: Message, lang: str = "en") -> None:
             raw = raw[len(prefix):].strip()
             break
 
-    # No query → show genre selector
     if not raw:
-        prompt = "🎬 *اختر النوع أو ابحث باسم الفيلم:*" if lang == "ar" \
-            else "🎬 *Pick a genre or search by name:*"
-        await message.answer(prompt, parse_mode="Markdown", reply_markup=_genre_kb(lang))
+        prompt = "🎬 <b>اختر النوع أو ابحث باسم الفيلم:</b>" if lang == "ar" \
+            else "🎬 <b>Pick a genre or search by name:</b>"
+        await message.answer(prompt, parse_mode="HTML", reply_markup=_genre_kb(lang))
         return
 
     query, requested_year = _extract_year(raw)
-    if not query:
-        query = raw
+    query = query or raw  # keep original if year-strip left nothing
 
     try:
         data = await omega_movies.search(query)
@@ -8884,12 +8892,12 @@ async def cmd_movie(message: Message, lang: str = "en") -> None:
         if requested_year is not None:
             filtered = [r for r in results if _item_year(r) == requested_year]
             if not filtered:
-                no_result = (
+                msg = (
                     f"❌ لا توجد نتائج في {requested_year}"
                     if lang == "ar"
                     else f"❌ No results found for {requested_year}"
                 )
-                await message.answer(no_result)
+                await message.answer(msg)
                 return
             results = filtered
 
@@ -8897,7 +8905,7 @@ async def cmd_movie(message: Message, lang: str = "en") -> None:
             await _send_card(message, item, lang)
 
     except Exception as exc:
-        logger.error(f"Movie error: {exc}", exc_info=True)
+        logger.error(f"Movie search error: {exc}", exc_info=True)
         await message.answer(t("error", lang))
 
 
@@ -8948,7 +8956,7 @@ async def handle_genre_cb(callback: CallbackQuery, lang: str = "en") -> None:
 async def handle_mv_cb(callback: CallbackQuery, lang: str = "en") -> None:
     parts = callback.data.split(":")
     await callback.answer()
-    if parts[1] != "detail" or len(parts) < 4:
+    if len(parts) < 4 or parts[1] != "detail":
         return
     try:
         tmdb_id, media_type = int(parts[2]), parts[3]
@@ -8961,35 +8969,49 @@ async def handle_mv_cb(callback: CallbackQuery, lang: str = "en") -> None:
             await callback.message.answer(t("error", lang))
             return
 
-        title = data.get("title", "")
-        rd = data.get("release_date", "")
+        title = _e(data.get("title", ""))
+        rd = _e(data.get("release_date", ""))
         year = rd[:4] if rd else "?"
         vote = data.get("vote_average", 0)
-        genres = " · ".join(data.get("genres", [])[:3])
-        overview = (data.get("overview") or "")[:200]
+        genres = _e(" · ".join(data.get("genres", [])[:3]))
+        overview = _e((data.get("overview") or "")[:300])
 
-        text = (
-            f"🎬 *{title}* `({year})`\n"
-            f"⭐ `{vote}/10`  ·  🎭 {genres}\n"
-            f"📅 {rd}"
-        )
-        if data.get("runtime"):
-            text += f"  ·  ⏱ {data['runtime']} min"
-        if data.get("tagline"):
-            text += f"\n\n_{data['tagline']}_"
-        if data.get("director"):
-            text += f"\n\n🎬 {t('label_director', lang)}: {data['director']}"
+        lines = [
+            f"🎬 <b>{title}</b> <code>({year})</code>",
+            f"⭐ <code>{vote}/10</code>  ·  🎭 {genres}",
+            f"📅 {rd}",
+        ]
+        runtime = data.get("runtime") or 0
+        if runtime:
+            lines[-1] += f"  ·  ⏱ {runtime} min"
+
+        tagline = (data.get("tagline") or "").strip()
+        if tagline:
+            lines.append(f"
+<i>{_e(tagline)}</i>")
+
+        director = (data.get("director") or "").strip()
+        if director:
+            lines.append(f"
+🎬 {t('label_director', lang)}: {_e(director)}")
+
         cast = data.get("cast", [])
         if cast:
-            names = ", ".join(c.get("name", "") for c in cast[:4] if c.get("name"))
+            names = ", ".join(_e(c.get("name", "")) for c in cast[:4] if c.get("name"))
             if names:
-                text += f"\n🌟 {t('label_cast', lang)}: {names}"
-        if overview:
-            text += f"\n\n📝 {overview}"
-        if data.get("trailer_url"):
-            text += f"\n\n🎥 [Trailer]({data['trailer_url']})"
+                lines.append(f"🌟 {t('label_cast', lang)}: {names}")
 
-        await callback.message.answer(text, parse_mode="Markdown")
+        if overview:
+            lines.append(f"
+📝 {overview}")
+
+        trailer = (data.get("trailer_url") or "").strip()
+        if trailer and trailer.startswith("http"):
+            lines.append(f'
+🎥 <a href="{html.escape(trailer)}">Trailer</a>')
+
+        await callback.message.answer("
+".join(lines), parse_mode="HTML")
 
     except Exception as exc:
         logger.error(f"Movie detail error: {exc}", exc_info=True)
@@ -9014,20 +9036,6 @@ from typing import Optional
 from collections import defaultdict
 
 import httpx
-from aiogram import Router, F
-from aiogram.types import Message
-from aiogram.filters import Command
-
-from services.omega_router import omega_router
-from services.omega_query_engine import query_engine
-from services.omega_fusion import omega_fusion
-from services.omega_judge import omega_judge
-from services.omega_memory import omega_memory
-from services.rate_limiter import check_user_rate
-from services.web_search import web_search, needs_web_search
-from config import settings, t
-from database.connection import get_session
-from database.crud import CRUDManager
 
 # ── Download-intent detection ───────────────────────────────────
 _DL_KW = {"download", "تحميل", "نزل", "حمل", "حمّل", "تنزيل", "دانلود"}
@@ -9044,6 +9052,20 @@ def _extract_media_url(text: str) -> Optional[str]:
         return None
     url = m.group(0).rstrip(".,;)")
     return url if any(d in url.lower() for d in _DL_DOMAINS) else None
+from aiogram import Router, F
+from aiogram.types import Message
+from aiogram.filters import Command
+
+from services.omega_router import omega_router
+from services.omega_query_engine import query_engine
+from services.omega_fusion import omega_fusion
+from services.omega_judge import omega_judge
+from services.omega_memory import omega_memory
+from services.rate_limiter import check_user_rate
+from services.web_search import web_search, needs_web_search
+from config import settings, t
+from database.connection import get_session
+from database.crud import CRUDManager
 
 # ── Smart routing keywords ──────────────────────────────────────
 _GOLD_KW    = {"ذهب", "gold", "فضة", "silver", "بلاتين", "platinum", "معادن", "metals",
@@ -9241,11 +9263,13 @@ async def _route_to_service(message: Message, query: str, lang: str) -> bool:
     url = _extract_media_url(query)
     if url or _has_kw(query, _DL_KW):
         if url:
+            # Keyword + URL, or bare URL with keyword context — show format picker
             from handlers.downloader import _pending_urls, _format_kb
             _pending_urls[message.from_user.id] = url
             prompt = "🎬 اختر صيغة التحميل:" if lang == "ar" else "🎬 Choose download format:"
             await message.answer(prompt, reply_markup=_format_kb(lang))
         else:
+            # Keyword present but no URL — ask for the link
             hint = (
                 "📥 أرسل الرابط الذي تريد تحميله"
                 if lang == "ar"
@@ -9273,15 +9297,18 @@ async def _route_to_service(message: Message, query: str, lang: str) -> bool:
             from api_clients.omega_weather import omega_weather
             await message.answer(t("fetching", lang))
             data = await omega_weather.get_weather(city, lang)
-            if not data.get("error"):
+            if data and not data.get("error"):
                 text = f"🌤 *{data.get('city', city)}*\n\n"
-                text += f"🌡 {t('label_temp', lang)}: {data['temperature']}°C\n"
+                text += f"🌡 {t('label_temp', lang)}: {data.get('temperature', 'N/A')}°C\n"
                 text += f"🤔 {t('label_feels', lang)}: {data.get('feels_like', 'N/A')}°C\n"
                 text += f"💧 {t('label_humidity', lang)}: {data.get('humidity', 'N/A')}%\n"
                 text += f"💨 {t('label_wind', lang)}: {data.get('wind_speed', 'N/A')} km/h\n"
                 if data.get("description"):
                     text += f"📝 {data['description']}\n"
-                await message.answer(text, parse_mode="Markdown")
+                try:
+                    await message.answer(text, parse_mode="Markdown")
+                except Exception:
+                    await message.answer(text)
             else:
                 await message.answer(t("error", lang))
             return True
@@ -9459,7 +9486,11 @@ async def process_ai_query(message: Message, query: str, lang: str = "en") -> No
         if len(text) > 4000:
             text = text[:4000] + "..."
 
-        await message.answer(text, parse_mode="Markdown")
+        try:
+            await message.answer(text, parse_mode="Markdown")
+        except Exception:
+            # Fallback: send plain if AI output contains invalid Markdown
+            await message.answer(text)
 
         # Save to in-memory conversation history
         _history_add(user_id, "user", query)
@@ -9627,6 +9658,7 @@ async def handle_photo_message(message: Message, lang: str = "en") -> None:
 
 def register_ai_handlers(dp) -> None:
     dp.include_router(router)
+
 '''
 
 FILES["handlers/stocks.py"] = r'''
@@ -9957,6 +9989,7 @@ def register_settings_handlers(dp) -> None:
 '''
 
 FILES["handlers/downloader.py"] = r'''
+import html
 import os
 import re
 import logging
@@ -9991,6 +10024,7 @@ _TT_DOMAINS = ("tiktok.com", "vm.tiktok.com", "vt.tiktok.com")
 _YT_ID_RE = re.compile(r'(?:v=|youtu\.be/|/shorts/|embed/)([A-Za-z0-9_-]{11})')
 
 _MAX_TG_BYTES = 50 * 1024 * 1024  # 50 MB Telegram upload limit
+_YTDLP_TIMEOUT = 45.0  # seconds for yt-dlp extraction
 
 # user_id → URL awaiting format selection
 _pending_urls: dict[int, str] = {}
@@ -10040,6 +10074,14 @@ def _fmt_duration(secs: int) -> str:
     return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
 
 
+async def _safe_edit(msg, text: str, **kwargs) -> None:
+    """Edit a message safely — ignore errors if the message was already deleted."""
+    try:
+        await msg.edit_text(text, **kwargs)
+    except Exception:
+        pass
+
+
 # ─── Cobalt API ────────────────────────────────────────────────────────────────
 
 async def _cobalt_get_link(url: str, fmt: str) -> Optional[dict]:
@@ -10052,29 +10094,38 @@ async def _cobalt_get_link(url: str, fmt: str) -> Optional[dict]:
         "filenameStyle": "nerdy",
         "alwaysProxy": True,
     }
-    async with httpx.AsyncClient(timeout=30) as client:
-        try:
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(
                 "https://api.cobalt.tools/",
                 json=body,
                 headers={"Accept": "application/json", "Content-Type": "application/json"},
             )
-        except Exception as exc:
-            logger.warning(f"Cobalt request error: {exc}")
-            return None
+    except Exception as exc:
+        logger.warning(f"Cobalt request error: {exc}")
+        return None
 
-        if resp.status_code >= 400:
-            logger.warning(f"Cobalt HTTP {resp.status_code}: {resp.text[:200]}")
-            return None
+    if resp.status_code >= 400:
+        logger.warning(f"Cobalt HTTP {resp.status_code}: {resp.text[:200]}")
+        return None
+
+    try:
         data = resp.json()
+    except Exception as exc:
+        logger.warning(f"Cobalt JSON parse error: {exc}")
+        return None
 
     status = data.get("status")
     if status in ("stream", "tunnel", "redirect", "local-processing"):
-        return {"url": data.get("url"), "filename": data.get("filename") or "media"}
+        dl_url = data.get("url")
+        if not dl_url:
+            return None
+        return {"url": dl_url, "filename": data.get("filename") or "media"}
     if status == "picker":
         items = data.get("picker") or []
         if items:
-            return {"url": items[0].get("url"), "filename": "media"}
+            item_url = items[0].get("url")
+            return {"url": item_url, "filename": "media"} if item_url else None
     if status == "error":
         err = (data.get("error") or {}).get("code", "unknown")
         logger.warning(f"Cobalt error for {url!r}: {err}")
@@ -10090,7 +10141,7 @@ async def _stream_to_tmp(dl_url: str) -> Optional[str]:
     written = 0
     try:
         async with httpx.AsyncClient(
-            timeout=httpx.Timeout(60.0, connect=10.0),
+            timeout=httpx.Timeout(120.0, connect=15.0),
             follow_redirects=True,
         ) as client:
             async with client.stream(
@@ -10100,6 +10151,7 @@ async def _stream_to_tmp(dl_url: str) -> Optional[str]:
                 if resp.status_code >= 400:
                     os.unlink(path)
                     return None
+                # Check Content-Length header early to skip huge files fast
                 cl = resp.headers.get("content-length")
                 try:
                     if cl and int(cl) > _MAX_TG_BYTES:
@@ -10139,24 +10191,28 @@ async def _send_media_file(message: Message, path: str, filename: str, fmt: str)
 
 async def _tikwm_get_url(url: str, fmt: str) -> Optional[str]:
     """TikWM API — tikwm.com-hosted URLs, never IP-bound TikTok CDN."""
-    async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.get(
-            "https://www.tikwm.com/api/",
-            params={"url": url, "hd": "1"},
-            headers={"User-Agent": "Mozilla/5.0"},
-        )
-        if resp.status_code >= 400:
-            return None
-        data = resp.json()
-
-    if data.get("code") != 0:
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                "https://www.tikwm.com/api/",
+                params={"url": url, "hd": "1"},
+                headers={"User-Agent": "Mozilla/5.0"},
+            )
+            if resp.status_code >= 400:
+                return None
+            data = resp.json()
+    except Exception as exc:
+        logger.warning(f"TikWM request error: {exc}")
         return None
-    d = data.get("data", {})
+
+    if not isinstance(data, dict) or data.get("code") != 0:
+        return None
+    d = data.get("data") or {}
     if fmt == "mp3":
-        return d.get("music")
+        return d.get("music") or None
     if fmt == "low":
-        return d.get("play")
-    return d.get("hdplay") or d.get("play")
+        return d.get("play") or None
+    return d.get("hdplay") or d.get("play") or None
 
 
 async def _piped_get_url(url: str, fmt: str) -> Optional[str]:
@@ -10165,14 +10221,18 @@ async def _piped_get_url(url: str, fmt: str) -> Optional[str]:
     if not vid_id:
         return None
 
-    async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.get(
-            f"https://pipedapi.kavin.rocks/streams/{vid_id}",
-            headers={"User-Agent": "Mozilla/5.0"},
-        )
-        if resp.status_code >= 400:
-            return None
-        data = resp.json()
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                f"https://pipedapi.kavin.rocks/streams/{vid_id}",
+                headers={"User-Agent": "Mozilla/5.0"},
+            )
+            if resp.status_code >= 400:
+                return None
+            data = resp.json()
+    except Exception as exc:
+        logger.warning(f"Piped request error: {exc}")
+        return None
 
     if fmt == "mp3":
         streams = sorted(
@@ -10181,9 +10241,8 @@ async def _piped_get_url(url: str, fmt: str) -> Optional[str]:
         )
         return streams[0].get("url") if streams else None
 
-    streams = [s for s in (data.get("videoStreams") or []) if not s.get("videoOnly")]
-    if not streams:
-        streams = data.get("videoStreams") or []
+    all_streams = data.get("videoStreams") or []
+    streams = [s for s in all_streams if not s.get("videoOnly")] or all_streams
 
     def _res(s: dict) -> int:
         try:
@@ -10203,6 +10262,7 @@ def _extract_direct_url(url: str, fmt: str) -> dict:
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
+        "socket_timeout": 15,
         "http_headers": {"User-Agent": "Mozilla/5.0"},
     }
     if fmt == "mp3":
@@ -10215,6 +10275,9 @@ def _extract_direct_url(url: str, fmt: str) -> dict:
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=False)
 
+    if not info:
+        return {"title": "", "duration": 0, "direct_url": ""}
+
     direct = info.get("url", "")
     if not direct:
         fmts = info.get("formats") or []
@@ -10224,26 +10287,35 @@ def _extract_direct_url(url: str, fmt: str) -> dict:
     return {
         "title": info.get("title", ""),
         "duration": info.get("duration", 0),
-        "direct_url": direct,
+        "direct_url": direct or "",
     }
 
 
 def _build_link_reply(title: str, dur: str, direct: str, lang: str) -> str:
-    title_line = f"🎬 *{title}*\n" if title else ""
-    dur_line = f"⏱ {dur}\n" if dur else ""
+    safe_title = html.escape(title or "")
+    safe_link = html.escape(direct or "")
+    title_line = f"🎬 <b>{safe_title}</b>
+" if safe_title else ""
+    dur_line = f"⏱ {dur}
+" if dur else ""
     head = title_line + dur_line
     if head:
-        head += "\n"
+        head += "
+"
     if lang == "ar":
         return (
             f"{head}"
-            f"🔗 [افتح / حمّل الرابط المباشر]({direct})\n\n"
-            f"_⚠️ الرابط مؤقت — افتحه في المتصفح للتحميل_"
+            f'🔗 <a href="{safe_link}">افتح / حمّل الرابط المباشر</a>
+
+'
+            f"<i>⚠️ الرابط مؤقت — افتحه في المتصفح للتحميل</i>"
         )
     return (
         f"{head}"
-        f"🔗 [Open / Download Direct Link]({direct})\n\n"
-        f"_⚠️ Link is temporary — open in browser to save_"
+        f'🔗 <a href="{safe_link}">Open / Download Direct Link</a>
+
+'
+        f"<i>⚠️ Link is temporary — open in browser to save</i>"
     )
 
 
@@ -10288,10 +10360,9 @@ async def handle_dl_cb(callback: CallbackQuery, lang: str = "en") -> None:
 
     tmp_path: Optional[str] = None
     try:
-        # ── 1. cobalt.tools → stream-download → send file ──────────────────
+        # ── 1. TikWM (for TikTok) or Cobalt → download → send file ───────────
         cobalt_link = None
         if _is_tiktok(url):
-            # TikWM first for TikTok (returns stable tikwm.com URLs)
             try:
                 tik_url = await _tikwm_get_url(url, fmt)
                 if tik_url:
@@ -10309,66 +10380,69 @@ async def handle_dl_cb(callback: CallbackQuery, lang: str = "en") -> None:
             dl_url = cobalt_link["url"]
             filename = cobalt_link.get("filename") or "media"
 
-            await status_msg.edit_text(
-                "⬇️ جارٍ تحميل الملف..." if lang == "ar" else "⬇️ Downloading file..."
-            )
+            await _safe_edit(status_msg, "⬇️ جارٍ تحميل الملف..." if lang == "ar" else "⬇️ Downloading file...")
             tmp_path = await _stream_to_tmp(dl_url)
 
             if tmp_path:
-                await status_msg.edit_text(
-                    "📤 جارٍ الإرسال..." if lang == "ar" else "📤 Sending..."
-                )
+                await _safe_edit(status_msg, "📤 جارٍ الإرسال..." if lang == "ar" else "📤 Sending...")
                 await _send_media_file(callback.message, tmp_path, filename, fmt)
-                await status_msg.delete()
+                try:
+                    await status_msg.delete()
+                except Exception:
+                    pass
                 return
             else:
-                # File > 50 MB or download failed — send URL instead
+                # File > 50 MB — send direct link instead
                 text = _build_link_reply("", "", dl_url, lang)
-                await status_msg.edit_text(text, parse_mode="Markdown")
+                await _safe_edit(status_msg, text, parse_mode="HTML")
                 return
 
-        # ── 2. YouTube → Piped URL fallback ───────────────────────────────
+        # ── 2. YouTube → Piped URL fallback ──────────────────────────────────
         if _is_youtube(url):
             try:
                 piped_url = await _piped_get_url(url, fmt)
                 if piped_url:
                     text = _build_link_reply("", "", piped_url, lang)
-                    await status_msg.edit_text(text, parse_mode="Markdown")
+                    await _safe_edit(status_msg, text, parse_mode="HTML")
                     return
             except Exception as exc:
                 logger.warning(f"Piped failed: {exc}")
 
-        # ── 3. yt-dlp last-resort URL extraction ──────────────────────────
+        # ── 3. yt-dlp last-resort URL extraction (with hard timeout) ─────────
         try:
             loop = asyncio.get_event_loop()
-            data = await loop.run_in_executor(None, _extract_direct_url, url, fmt)
-            direct = data["direct_url"]
+            data = await asyncio.wait_for(
+                loop.run_in_executor(None, _extract_direct_url, url, fmt),
+                timeout=_YTDLP_TIMEOUT,
+            )
+            direct = data.get("direct_url", "")
             if direct:
                 title = data.get("title") or ""
                 dur = _fmt_duration(data.get("duration") or 0)
                 text = _build_link_reply(title, dur, direct, lang)
-                await status_msg.edit_text(text, parse_mode="Markdown")
+                await _safe_edit(status_msg, text, parse_mode="HTML")
                 return
+        except asyncio.TimeoutError:
+            logger.warning(f"yt-dlp timed out for {url!r}")
         except Exception as exc:
             logger.warning(f"yt-dlp failed: {exc}")
 
-        # ── 4. All methods failed ─────────────────────────────────────────
-        await status_msg.edit_text(
-            "⚠️ تعذّر معالجة الرابط حالياً. جرّب لاحقاً أو استخدم: @SaveVideo_Bot"
+        # ── 4. All methods failed ─────────────────────────────────────────────
+        await _safe_edit(
+            status_msg,
+            "⚠️ تعذّر معالجة الرابط حالياً. جرّب لاحقاً."
             if lang == "ar"
-            else "⚠️ Unable to process this link at the moment. Please try again later."
+            else "⚠️ Unable to process this link at the moment. Please try again later.",
         )
 
     except Exception as exc:
         logger.error(f"Downloader error for {url!r}: {exc}", exc_info=True)
-        try:
-            await status_msg.edit_text(
-                "⚠️ حدث خطأ غير متوقع. جرّب: @SaveVideo_Bot"
-                if lang == "ar"
-                else "⚠️ An unexpected error occurred. Try: @SaveVideo_Bot"
-            )
-        except Exception:
-            pass
+        await _safe_edit(
+            status_msg,
+            "⚠️ حدث خطأ غير متوقع. جرّب لاحقاً."
+            if lang == "ar"
+            else "⚠️ An unexpected error occurred. Please try again later.",
+        )
     finally:
         if tmp_path:
             try:
@@ -10413,31 +10487,44 @@ _GEMINI_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models"
     "/gemini-2.0-flash:generateContent"
 )
-_SUMMARY_THRESHOLD = 500
+_SUMMARY_THRESHOLD = 500  # chars
 
 
-async def _transcribe(audio_path: str) -> str:
+async def _transcribe(audio_path: str, api_key: str) -> str:
+    """Send audio file to Groq Whisper; return transcript text."""
+    ext_lower = os.path.splitext(audio_path)[1].lstrip(".").lower()
+    mime = _AUDIO_MIME.get(ext_lower, "audio/mpeg")
     async with httpx.AsyncClient(timeout=120) as client:
-        ext_lower = os.path.splitext(audio_path)[1].lstrip(".").lower()
-        mime = _AUDIO_MIME.get(ext_lower, "audio/mpeg")
         with open(audio_path, "rb") as fh:
             resp = await client.post(
                 _GROQ_STT_URL,
-                headers={"Authorization": f"Bearer {settings.groq_api_key}"},
+                headers={"Authorization": f"Bearer {api_key}"},
                 files={"file": (os.path.basename(audio_path), fh, mime)},
                 data={"model": _GROQ_MODEL, "response_format": "text"},
             )
-        resp.raise_for_status()
-        return resp.text.strip()
+    # Groq returns 200 with plain text for success, 4xx for errors
+    if resp.status_code >= 400:
+        err_msg = ""
+        try:
+            err_msg = resp.json().get("error", {}).get("message", "")
+        except Exception:
+            err_msg = resp.text[:200]
+        raise RuntimeError(f"Groq API error {resp.status_code}: {err_msg}")
+    return resp.text.strip()
 
 
 async def _summarize(text: str, lang: str) -> Optional[str]:
+    """Ask Gemini for a 3-point summary. Returns None if key missing or call fails."""
     if not settings.gemini_api_key:
         return None
     prompt = (
-        f"لخّص النص التالي في 3 نقاط رئيسية موجزة:\n\n{text}"
+        f"لخّص النص التالي في 3 نقاط رئيسية موجزة:
+
+{text[:4000]}"
         if lang == "ar"
-        else f"Summarize the following text in exactly 3 concise bullet points:\n\n{text}"
+        else f"Summarize the following text in exactly 3 concise bullet points:
+
+{text[:4000]}"
     )
     try:
         async with httpx.AsyncClient(timeout=60) as client:
@@ -10447,18 +10534,21 @@ async def _summarize(text: str, lang: str) -> Optional[str]:
             )
             resp.raise_for_status()
             data = resp.json()
-            parts = (
-                data.get("candidates", [{}])[0]
-                .get("content", {})
-                .get("parts", [{}])
-            )
-            return (parts[0].get("text") or "").strip() or None
+            candidates = data.get("candidates") or []
+            if not candidates:
+                return None
+            parts = candidates[0].get("content", {}).get("parts") or []
+            if not parts:
+                return None
+            result = (parts[0].get("text") or "").strip()
+            return result or None
     except Exception as exc:
         logger.warning(f"Gemini summary failed: {exc}")
         return None
 
 
 def _extract_audio(input_path: str, output_path: str) -> bool:
+    """Extract audio from video using ffmpeg. Returns True on success."""
     try:
         result = subprocess.run(
             [
@@ -10469,29 +10559,50 @@ def _extract_audio(input_path: str, output_path: str) -> bool:
             capture_output=True,
             timeout=120,
         )
-        return result.returncode == 0 and os.path.exists(output_path)
+        # Verify the output file exists and has non-zero size
+        return (
+            result.returncode == 0
+            and os.path.exists(output_path)
+            and os.path.getsize(output_path) > 0
+        )
     except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
         logger.warning(f"ffmpeg unavailable: {exc}")
         return False
 
 
 async def _process(message: Message, file_id: str, ext: str, lang: str) -> None:
+    """Download, transcribe, optionally summarize, then clean up."""
+    # Check API key before doing anything expensive
+    if not settings.groq_api_key:
+        await message.answer(
+            "❌ خدمة النسخ غير مفعّلة حالياً." if lang == "ar"
+            else "❌ Transcription service is not configured."
+        )
+        return
+
     wait_msg = await message.answer(
-        "🎙️ جارٍ النسخ..." if lang == "ar" else "🎙️ Transcribing..."
+        "🎙️ جارٍ تحميل الملف..." if lang == "ar" else "🎙️ Downloading file..."
     )
     tmp_dir = tempfile.mkdtemp(prefix="vx_tr_")
     try:
-        if not settings.groq_api_key:
-            await wait_msg.edit_text(
-                "❌ مفتاح Groq غير مُهيَّأ." if lang == "ar"
-                else "❌ Groq API key is not configured."
-            )
-            return
-
+        # ── Download from Telegram ─────────────────────────────────────────
         audio_path = os.path.join(tmp_dir, f"input.{ext}")
         await message.bot.download(file_id, destination=audio_path)
 
+        # Verify download succeeded
+        if not os.path.exists(audio_path) or os.path.getsize(audio_path) == 0:
+            await wait_msg.edit_text(
+                "❌ فشل تحميل الملف." if lang == "ar"
+                else "❌ Failed to download the file."
+            )
+            return
+
+        # ── Extract audio for video types ─────────────────────────────────
         if ext in ("mp4", "webm", "avi", "mov", "mkv"):
+            await wait_msg.edit_text(
+                "🔄 جارٍ استخراج الصوت..." if lang == "ar"
+                else "🔄 Extracting audio..."
+            )
             extracted = os.path.join(tmp_dir, "audio.mp3")
             ok = await asyncio.get_event_loop().run_in_executor(
                 None, _extract_audio, audio_path, extracted
@@ -10500,30 +10611,64 @@ async def _process(message: Message, file_id: str, ext: str, lang: str) -> None:
                 audio_path = extracted
             else:
                 await wait_msg.edit_text(
-                    "⚠️ تعذّر استخراج الصوت. أرسل ملف صوت مباشرةً."
+                    "⚠️ تعذّر استخراج الصوت. تأكد أن الفيديو يحتوي على مسار صوتي."
                     if lang == "ar"
-                    else "⚠️ Could not extract audio. Please send an audio file directly."
+                    else "⚠️ Could not extract audio. Make sure the video has an audio track."
                 )
                 return
 
-        text = await _transcribe(audio_path)
-        if not text:
+        # ── Transcribe ─────────────────────────────────────────────────────
+        await wait_msg.edit_text(
+            "🎙️ جارٍ النسخ..." if lang == "ar" else "🎙️ Transcribing..."
+        )
+        text = await _transcribe(audio_path, settings.groq_api_key)
+
+        if not text.strip():
             await wait_msg.edit_text(
-                "❌ لم يُتعرَّف على أي كلام." if lang == "ar"
+                "❌ لم يُتعرَّف على أي كلام في الملف." if lang == "ar"
                 else "❌ No speech detected in the file."
             )
             return
 
-        header = "🎙️ *النص المستخرج:*\n\n" if lang == "ar" else "🎙️ *Transcription:*\n\n"
-        body = text if len(text) <= 3800 else text[:3800] + "…"
-        await wait_msg.edit_text(header + body, parse_mode="Markdown")
+        header = "🎙️ *النص المستخرج:*
 
+" if lang == "ar" else "🎙️ *Transcription:*
+
+"
+        # Telegram message limit is 4096 chars; truncate at a safe boundary
+        body = text if len(text) <= 3800 else text[:3797] + "…"
+
+        try:
+            await wait_msg.edit_text(header + body, parse_mode="Markdown")
+        except Exception:
+            # Fallback: send as plain text if transcript contains Markdown chars
+            await wait_msg.edit_text("🎙️ Transcription:
+
+" + body)
+
+        # ── Summarize long texts ───────────────────────────────────────────
         if len(text) > _SUMMARY_THRESHOLD:
-            await message.answer("⏳ جارٍ التلخيص..." if lang == "ar" else "⏳ Summarizing...")
+            sum_status = await message.answer(
+                "⏳ جارٍ التلخيص..." if lang == "ar" else "⏳ Summarizing..."
+            )
             summary = await _summarize(text, lang)
             if summary:
-                sum_header = "📝 *الملخص:*\n\n" if lang == "ar" else "📝 *Summary:*\n\n"
-                await message.answer(sum_header + summary, parse_mode="Markdown")
+                sum_header = "📝 *الملخص:*
+
+" if lang == "ar" else "📝 *Summary:*
+
+"
+                try:
+                    await sum_status.edit_text(sum_header + summary, parse_mode="Markdown")
+                except Exception:
+                    await sum_status.edit_text("📝 Summary:
+
+" + summary)
+            else:
+                try:
+                    await sum_status.delete()
+                except Exception:
+                    pass
 
     except Exception as exc:
         logger.error(f"Transcription error: {exc}", exc_info=True)
@@ -10540,15 +10685,19 @@ async def _process(message: Message, file_id: str, ext: str, lang: str) -> None:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
+# ── Command handler ────────────────────────────────────────────────────────────
+
 @router.message(Command("transcribe"))
 async def cmd_transcribe(message: Message, lang: str = "en") -> None:
     hint = (
-        "🎙️ أرسل رسالة صوتية أو مقطع فيديو لتحويله إلى نص."
+        "🎙️ أرسل رسالة صوتية أو مقطع فيديو أو ملف صوتي لتحويله إلى نص."
         if lang == "ar"
         else "🎙️ Send a voice message, video, or audio file to transcribe it."
     )
     await message.answer(hint)
 
+
+# ── Media type handlers ────────────────────────────────────────────────────────
 
 @router.message(F.voice)
 async def handle_voice(message: Message, lang: str = "en") -> None:
@@ -10569,7 +10718,9 @@ async def handle_video(message: Message, lang: str = "en") -> None:
 async def handle_audio_file(message: Message, lang: str = "en") -> None:
     ext = "mp3"
     if message.audio.file_name:
-        ext = message.audio.file_name.rsplit(".", 1)[-1].lower() or "mp3"
+        parts = message.audio.file_name.rsplit(".", 1)
+        if len(parts) == 2 and parts[1]:
+            ext = parts[1].lower()
     await _process(message, message.audio.file_id, ext, lang)
 
 

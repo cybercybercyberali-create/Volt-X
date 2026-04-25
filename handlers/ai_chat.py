@@ -270,15 +270,18 @@ async def _route_to_service(message: Message, query: str, lang: str) -> bool:
             from api_clients.omega_weather import omega_weather
             await message.answer(t("fetching", lang))
             data = await omega_weather.get_weather(city, lang)
-            if not data.get("error"):
+            if data and not data.get("error"):
                 text = f"🌤 *{data.get('city', city)}*\n\n"
-                text += f"🌡 {t('label_temp', lang)}: {data['temperature']}°C\n"
+                text += f"🌡 {t('label_temp', lang)}: {data.get('temperature', 'N/A')}°C\n"
                 text += f"🤔 {t('label_feels', lang)}: {data.get('feels_like', 'N/A')}°C\n"
                 text += f"💧 {t('label_humidity', lang)}: {data.get('humidity', 'N/A')}%\n"
                 text += f"💨 {t('label_wind', lang)}: {data.get('wind_speed', 'N/A')} km/h\n"
                 if data.get("description"):
                     text += f"📝 {data['description']}\n"
-                await message.answer(text, parse_mode="Markdown")
+                try:
+                    await message.answer(text, parse_mode="Markdown")
+                except Exception:
+                    await message.answer(text)
             else:
                 await message.answer(t("error", lang))
             return True
@@ -456,7 +459,11 @@ async def process_ai_query(message: Message, query: str, lang: str = "en") -> No
         if len(text) > 4000:
             text = text[:4000] + "..."
 
-        await message.answer(text, parse_mode="Markdown")
+        try:
+            await message.answer(text, parse_mode="Markdown")
+        except Exception:
+            # Fallback: send plain if AI output contains invalid Markdown
+            await message.answer(text)
 
         # Save to in-memory conversation history
         _history_add(user_id, "user", query)
