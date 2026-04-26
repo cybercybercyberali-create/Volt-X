@@ -581,6 +581,91 @@ class OmegaFootball:
                 return fixtures
         return {"error": True}
 
+    async def _sofascore_team_schedule_by_name(
+        self, team_name: str, league_code: str
+    ) -> tuple[list, list, list]:
+        """Search Sofascore for a team by name, return (past, live, upcoming) filtered to league."""
+        sf_tid = _SF_TOURNAMENT_IDS.get(league_code.upper()) if league_code else None
+        league_ar_name = MAJOR_LEAGUES.get(league_code.upper(), {}).get("name_ar", "")
+        past: list[dict] = []
+        live: list[dict] = []
+        upcoming: list[dict] = []
+        try:
+            async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+                # Search for the team
+                r = await client.get(
+                    "https://api.sofascore.com/api/v1/search/all",
+                    params={"q": team_name, "page": 0},
+                    headers=_SF_HEADERS,
+                )
+                if r.status_code != 200:
+                    return past, live, upcoming
+                data = r.json()
+                results = data.get("results") or []
+                team_id = None
+                for entry in results[:10]:
+                    if entry.get("type") != "team":
+                        continue
+                    entity = entry.get("entity") or {}
+                    if not entity:
+                        continue
+                    # Only consider football teams
+                    sport = (entity.get("sport") or {}).get("name", "")
+                    if sport and sport.lower() != "football":
+                        continue
+                    name = entity.get("name", "")
+                    if self._name_matches(team_name, name):
+                        team_id = entity.get("id")
+                        break
+                if not team_id:
+                    return past, live, upcoming
+
+                past_raw: list[dict] = []
+                next_raw: list[dict] = []
+                for path, dest in (
+                    ("events/last/0", past_raw),
+                    ("events/next/0", next_raw),
+                ):
+                    r2 = await client.get(
+                        f"https://api.sofascore.com/api/v1/team/{team_id}/{path}",
+                        headers=_SF_HEADERS,
+                    )
+                    if r2.status_code == 200:
+                        dest += r2.json().get("events", [])
+
+                for ev in past_raw:
+                    if sf_tid and _sf_tid(ev) != sf_tid:
+                        continue
+                    n = _normalize_sofascore(ev)
+                    if not n:
+                        continue
+                    if league_ar_name:
+                        n["league_ar"] = league_ar_name
+                    if n.get("status") in ("1H", "2H", "HT", "ET", "PEN"):
+                        live.append(n)
+                    else:
+                        past.append(n)
+
+                for ev in next_raw:
+                    if sf_tid and _sf_tid(ev) != sf_tid:
+                        continue
+                    n = _normalize_sofascore(ev)
+                    if not n:
+                        continue
+                    if league_ar_name:
+                        n["league_ar"] = league_ar_name
+                    status = n.get("status", "NS")
+                    if status in ("1H", "2H", "HT", "ET", "PEN"):
+                        live.append(n)
+                    elif status == "FT":
+                        past.append(n)
+                    else:
+                        upcoming.append(n)
+
+        except Exception as exc:
+            logger.warning(f"Sofascore team schedule by name '{team_name}': {exc}")
+        return past, live, upcoming
+
     async def get_league_teams(self, league_code: str) -> list[dict]:
         """Return [{id, name}] for a league using the canonical _FALLBACK_TEAMS list."""
         lc = league_code.upper()
@@ -685,23 +770,46 @@ class OmegaFootball:
                 except Exception as exc:
                     logger.warning(f"API-Football team schedule {team_name}: {exc}")
 
-        # Source 2 — TheSportsDB (if API-Football unavailable or returned nothing)
+        # Source 2 — Sofascore (free, no key) — search by name, filter by league
+        if not (past or live or upcoming):
+            sf_past, sf_live, sf_upcoming = await self._sofascore_team_schedule_by_name(
+                team_name, league_code
+            )
+            past.extend(sf_past)
+            live.extend(sf_live)
+            upcoming.extend(sf_upcoming)
+
+        # Source 3 — TheSportsDB (if both paid + Sofascore failed)
+        # Guard: only keep fixtures where the searched team actually plays.
         if not (past or live or upcoming):
             _, past_raw, upcoming_raw = await self._fetch_thesportsdb_team(team_name)
             for ev in past_raw:
                 n = self._normalize_tsdb(ev, league_code)
-                if n:
+                if not n:
+                    continue
+                home, away = n.get("home", ""), n.get("away", "")
+                if not (self._name_matches(team_name, home) or self._name_matches(team_name, away)):
+                    continue
+                if n.get("status") in ("1H", "2H", "HT", "ET", "PEN"):
+                    live.append(n)
+                elif n.get("status") == "FT":
                     past.append(n)
+                else:
+                    upcoming.append(n)
             for ev in upcoming_raw:
                 n = self._normalize_tsdb(ev, league_code)
-                if n:
-                    status = n.get("status", "NS")
-                    if status in ("1H", "2H", "HT", "ET", "PEN"):
-                        live.append(n)
-                    elif status == "FT":
-                        past.append(n)
-                    else:
-                        upcoming.append(n)
+                if not n:
+                    continue
+                home, away = n.get("home", ""), n.get("away", "")
+                if not (self._name_matches(team_name, home) or self._name_matches(team_name, away)):
+                    continue
+                status = n.get("status", "NS")
+                if status in ("1H", "2H", "HT", "ET", "PEN"):
+                    live.append(n)
+                elif status == "FT":
+                    past.append(n)
+                else:
+                    upcoming.append(n)
 
         past.sort(key=lambda x: x.get("date_utc", ""), reverse=True)
         upcoming.sort(key=lambda x: x.get("date_utc", ""))
