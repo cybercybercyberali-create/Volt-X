@@ -8898,7 +8898,7 @@ from config import t
 logger = logging.getLogger(__name__)
 router = Router(name="movies")
 
-_YEAR_RE = re.compile(r"(19[0-9]{2}|20[0-9]{2})")
+_YEAR_RE = re.compile(r"\b(19[0-9]{2}|20[0-9]{2})\b")
 
 # Genre list: (tmdb_id, ar_label, en_label)
 _GENRES = [
@@ -8958,10 +8958,8 @@ def _caption(item: dict) -> str:
     overview = (item.get("overview") or "")
     preview = _e(overview[:200] + ("..." if len(overview) > 200 else ""))
     return (
-        f"🎬 <b>{title}</b> <code>({year})</code>
-"
-        f"⭐ <code>{vote}/10</code>  ·  🎭 {genres_str}
-"
+        f"🎬 <b>{title}</b> <code>({year})</code>\n"
+        f"⭐ <code>{vote}/10</code>  ·  🎭 {genres_str}\n"
         f"📝 {preview}"
     )
 
@@ -9095,13 +9093,11 @@ async def handle_mv_cb(callback: CallbackQuery, lang: str = "en") -> None:
 
         tagline = (data.get("tagline") or "").strip()
         if tagline:
-            lines.append(f"
-<i>{_e(tagline)}</i>")
+            lines.append(f"\n<i>{_e(tagline)}</i>")
 
         director = (data.get("director") or "").strip()
         if director:
-            lines.append(f"
-🎬 {t('label_director', lang)}: {_e(director)}")
+            lines.append(f"\n🎬 {t('label_director', lang)}: {_e(director)}")
 
         cast = data.get("cast", [])
         if cast:
@@ -9110,16 +9106,13 @@ async def handle_mv_cb(callback: CallbackQuery, lang: str = "en") -> None:
                 lines.append(f"🌟 {t('label_cast', lang)}: {names}")
 
         if overview:
-            lines.append(f"
-📝 {overview}")
+            lines.append(f"\n📝 {overview}")
 
         trailer = (data.get("trailer_url") or "").strip()
         if trailer and trailer.startswith("http"):
-            lines.append(f'
-🎥 <a href="{html.escape(trailer)}">Trailer</a>')
+            lines.append(f'\n🎥 <a href="{html.escape(trailer)}">Trailer</a>')
 
-        await callback.message.answer("
-".join(lines), parse_mode="HTML")
+        await callback.message.answer("\n".join(lines), parse_mode="HTML")
 
     except Exception as exc:
         logger.error(f"Movie detail error: {exc}", exc_info=True)
@@ -9129,9 +9122,6 @@ async def handle_mv_cb(callback: CallbackQuery, lang: str = "en") -> None:
 def register_movies_handlers(dp) -> None:
     dp.include_router(router)
 '''
-
-
-
 FILES["handlers/ai_chat.py"] = r'''
 import base64
 import io
