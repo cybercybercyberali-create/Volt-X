@@ -10392,27 +10392,20 @@ def _extract_direct_url(url: str, fmt: str) -> dict:
 def _build_link_reply(title: str, dur: str, direct: str, lang: str) -> str:
     safe_title = html.escape(title or "")
     safe_link = html.escape(direct or "")
-    title_line = f"🎬 <b>{safe_title}</b>
-" if safe_title else ""
-    dur_line = f"⏱ {dur}
-" if dur else ""
+    title_line = f"🎬 <b>{safe_title}</b>\n" if safe_title else ""
+    dur_line = f"⏱ {dur}\n" if dur else ""
     head = title_line + dur_line
     if head:
-        head += "
-"
+        head += "\n"
     if lang == "ar":
         return (
             f"{head}"
-            f'🔗 <a href="{safe_link}">افتح / حمّل الرابط المباشر</a>
-
-'
+            f'🔗 <a href="{safe_link}">افتح / حمّل الرابط المباشر</a>\n\n'
             f"<i>⚠️ الرابط مؤقت — افتحه في المتصفح للتحميل</i>"
         )
     return (
         f"{head}"
-        f'🔗 <a href="{safe_link}">Open / Download Direct Link</a>
-
-'
+        f'🔗 <a href="{safe_link}">Open / Download Direct Link</a>\n\n'
         f"<i>⚠️ Link is temporary — open in browser to save</i>"
     )
 
@@ -10616,13 +10609,9 @@ async def _summarize(text: str, lang: str) -> Optional[str]:
     if not settings.gemini_api_key:
         return None
     prompt = (
-        f"لخّص النص التالي في 3 نقاط رئيسية موجزة:
-
-{text[:4000]}"
+        f"لخّص النص التالي في 3 نقاط رئيسية موجزة:\n\n{text[:4000]}"
         if lang == "ar"
-        else f"Summarize the following text in exactly 3 concise bullet points:
-
-{text[:4000]}"
+        else f"Summarize the following text in exactly 3 concise bullet points:\n\n{text[:4000]}"
     )
     try:
         async with httpx.AsyncClient(timeout=60) as client:
@@ -10728,11 +10717,7 @@ async def _process(message: Message, file_id: str, ext: str, lang: str) -> None:
             )
             return
 
-        header = "🎙️ *النص المستخرج:*
-
-" if lang == "ar" else "🎙️ *Transcription:*
-
-"
+        header = "🎙️ *النص المستخرج:*\n\n" if lang == "ar" else "🎙️ *Transcription:*\n\n"
         # Telegram message limit is 4096 chars; truncate at a safe boundary
         body = text if len(text) <= 3800 else text[:3797] + "…"
 
@@ -10740,9 +10725,7 @@ async def _process(message: Message, file_id: str, ext: str, lang: str) -> None:
             await wait_msg.edit_text(header + body, parse_mode="Markdown")
         except Exception:
             # Fallback: send as plain text if transcript contains Markdown chars
-            await wait_msg.edit_text("🎙️ Transcription:
-
-" + body)
+            await wait_msg.edit_text("🎙️ Transcription:\n\n" + body)
 
         # ── Summarize long texts ───────────────────────────────────────────
         if len(text) > _SUMMARY_THRESHOLD:
@@ -10751,17 +10734,11 @@ async def _process(message: Message, file_id: str, ext: str, lang: str) -> None:
             )
             summary = await _summarize(text, lang)
             if summary:
-                sum_header = "📝 *الملخص:*
-
-" if lang == "ar" else "📝 *Summary:*
-
-"
+                sum_header = "📝 *الملخص:*\n\n" if lang == "ar" else "📝 *Summary:*\n\n"
                 try:
                     await sum_status.edit_text(sum_header + summary, parse_mode="Markdown")
                 except Exception:
-                    await sum_status.edit_text("📝 Summary:
-
-" + summary)
+                    await sum_status.edit_text("📝 Summary:\n\n" + summary)
             else:
                 try:
                     await sum_status.delete()
