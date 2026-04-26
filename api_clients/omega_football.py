@@ -584,70 +584,97 @@ class OmegaFootball:
     async def _sofascore_team_schedule_by_name(
         self, team_name: str, league_code: str
     ) -> tuple[list, list, list]:
-        """Search Sofascore for a team by name, return (past, live, upcoming) filtered to league."""
-        sf_tid = _SF_TOURNAMENT_IDS.get(league_code.upper()) if league_code else None
+        """Return (past, live, upcoming) for a team via Sofascore.
+
+        Strategy:
+          1. Try Sofascore team-search API → fetch team schedule directly.
+          2. Fall back to concurrent day-scan (±21 days) filtered by team name.
+        No tournament-ID filter — we show all competitions so users always
+        see results even when a team is mid-cup-run.
+        """
+        import asyncio as _aio
+        from datetime import date as _date, timedelta as _td
+
         league_ar_name = MAJOR_LEAGUES.get(league_code.upper(), {}).get("name_ar", "")
         past: list[dict] = []
         live: list[dict] = []
         upcoming: list[dict] = []
+
+        def _classify(ev_list: list, raw_events: list) -> None:
+            for ev in raw_events:
+                n = _normalize_sofascore(ev)
+                if not n:
+                    continue
+                if league_ar_name:
+                    n["league_ar"] = league_ar_name
+                status = n.get("status", "NS")
+                if status in ("1H", "2H", "HT", "ET", "PEN"):
+                    live.append(n)
+                elif status == "FT":
+                    past.append(n)
+                else:
+                    upcoming.append(n)
+
+        # ── Step 1: team-search API ────────────────────────────────────────
         try:
             async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
-                # Search for the team
                 r = await client.get(
                     "https://api.sofascore.com/api/v1/search/all",
                     params={"q": team_name, "page": 0},
                     headers=_SF_HEADERS,
                 )
-                if r.status_code != 200:
-                    return past, live, upcoming
-                data = r.json()
-                results = data.get("results") or []
-                team_id = None
-                for entry in results[:10]:
-                    if entry.get("type") != "team":
-                        continue
-                    entity = entry.get("entity") or {}
-                    if not entity:
-                        continue
-                    # Only consider football teams
-                    sport = (entity.get("sport") or {}).get("name", "")
-                    if sport and sport.lower() != "football":
-                        continue
-                    name = entity.get("name", "")
-                    if self._name_matches(team_name, name):
-                        team_id = entity.get("id")
-                        break
-                if not team_id:
-                    return past, live, upcoming
+                if r.status_code == 200:
+                    results = (r.json().get("results") or [])
+                    team_id = None
+                    for entry in results[:10]:
+                        if entry.get("type") != "team":
+                            continue
+                        entity = entry.get("entity") or {}
+                        sport = (entity.get("sport") or {}).get("name", "")
+                        if sport and sport.lower() != "football":
+                            continue
+                        if self._name_matches(team_name, entity.get("name", "")):
+                            team_id = entity.get("id")
+                            break
+                    if team_id:
+                        past_raw: list[dict] = []
+                        next_raw: list[dict] = []
+                        for path, dest in (
+                            ("events/last/0", past_raw),
+                            ("events/next/0", next_raw),
+                        ):
+                            r2 = await client.get(
+                                f"https://api.sofascore.com/api/v1/team/{team_id}/{path}",
+                                headers=_SF_HEADERS,
+                            )
+                            if r2.status_code == 200:
+                                dest += r2.json().get("events", [])
+                        _classify(past, past_raw)
+                        _classify(upcoming, next_raw)
+        except Exception as exc:
+            logger.warning(f"Sofascore team search '{team_name}': {exc}")
 
-                past_raw: list[dict] = []
-                next_raw: list[dict] = []
-                for path, dest in (
-                    ("events/last/0", past_raw),
-                    ("events/next/0", next_raw),
-                ):
-                    r2 = await client.get(
-                        f"https://api.sofascore.com/api/v1/team/{team_id}/{path}",
-                        headers=_SF_HEADERS,
-                    )
-                    if r2.status_code == 200:
-                        dest += r2.json().get("events", [])
-
-                for ev in past_raw:
-                    if sf_tid and _sf_tid(ev) != sf_tid:
-                        continue
-                    n = _normalize_sofascore(ev)
-                    if not n:
-                        continue
-                    if league_ar_name:
-                        n["league_ar"] = league_ar_name
-                    if n.get("status") in ("1H", "2H", "HT", "ET", "PEN"):
-                        live.append(n)
-                    else:
-                        past.append(n)
-
-                for ev in next_raw:
-                    if sf_tid and _sf_tid(ev) != sf_tid:
+        # ── Step 2: day-scan fallback (always works, uses cached daily data) ──
+        if not (past or live or upcoming):
+            today = _date.today()
+            dates = [
+                (today + _td(days=d)).strftime("%Y-%m-%d")
+                for d in range(-21, 22)
+            ]
+            all_day_events = await _aio.gather(
+                *[self._sofascore_raw_day(d) for d in dates],
+                return_exceptions=True,
+            )
+            for day_events in all_day_events:
+                if isinstance(day_events, Exception) or not day_events:
+                    continue
+                for ev in day_events:
+                    home = ev.get("homeTeam", {}).get("name", "")
+                    away = ev.get("awayTeam", {}).get("name", "")
+                    if not (
+                        self._name_matches(team_name, home)
+                        or self._name_matches(team_name, away)
+                    ):
                         continue
                     n = _normalize_sofascore(ev)
                     if not n:
@@ -662,8 +689,6 @@ class OmegaFootball:
                     else:
                         upcoming.append(n)
 
-        except Exception as exc:
-            logger.warning(f"Sofascore team schedule by name '{team_name}': {exc}")
         return past, live, upcoming
 
     async def get_league_teams(self, league_code: str) -> list[dict]:
