@@ -69,7 +69,6 @@ def fuel_card(
     def _fuel_line(emoji: str, label_ar: str, label_en: str,
                    key_ar: str, key_en: str, is_20l: bool) -> str:
         """Build one fuel price line, always showing LBP value."""
-        # Try canonical Arabic key first, then any key containing the hint
         val_str = (prices_llp.get(key_ar)
                    or next((v for k, v in prices_llp.items()
                             if key_en.lower() in k.lower() or key_ar in k), None))
@@ -127,7 +126,6 @@ def weather_card(data: dict, lang: str) -> str:
     observed_at = data.get("observed_at", "")
     is_stale    = data.get("stale", False)
 
-    # Format observation timestamp → "HH:MM"
     obs_str = ""
     if observed_at:
         try:
@@ -138,7 +136,6 @@ def weather_card(data: dict, lang: str) -> str:
     sep      = _sep()
     location = f"{city}, {country}" if country else city
 
-    # Wind direction: convert degrees to compass label
     def _compass(deg) -> str:
         try:
             d = float(deg)

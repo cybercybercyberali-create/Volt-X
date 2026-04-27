@@ -77,8 +77,6 @@ ARAB_FUEL_SOURCES = {
     "SD": {"name_ar": "السودان", "name_en": "Sudan", "types": ["benzin", "diesel", "gas"]},
 }
 
-
-# Per-country GPP page slugs for dedicated ScraperAPI fetching
 _GPP_COUNTRY_SLUGS: dict[str, str] = {
     "SA": "Saudi-Arabia",        "AE": "United-Arab-Emirates", "KW": "Kuwait",
     "QA": "Qatar",               "BH": "Bahrain",              "OM": "Oman",
@@ -89,7 +87,6 @@ _GPP_COUNTRY_SLUGS: dict[str, str] = {
     "BR": "Brazil",              "RU": "Russia",               "CN": "China",
 }
 
-# GlobalPetrolPrices country name → ISO code (for main listing page scraping)
 _GPP_NAME_TO_CODE: dict[str, str] = {
     "Saudi Arabia": "SA", "United Arab Emirates": "AE", "Egypt": "EG",
     "Kuwait": "KW", "Qatar": "QA", "Bahrain": "BH", "Oman": "OM",
@@ -283,8 +280,7 @@ class OmegaFuel:
         }
 
         # Source 0a: ScraperAPI — JS-rendered fetch (IPT is a React SPA)
-        from config import settings as _cfg
-        _skey = getattr(_cfg, "scraper_api_key", "") or ""
+        _skey = getattr(settings, "scraper_api_key", "") or ""
         if _skey:
             import httpx as _httpx
             _ipt_url = "https://www.iptgroup.com.lb/ipt/en/our-stations/fuel-prices"
@@ -435,8 +431,6 @@ class OmegaFuel:
                                     prices[fuel_name] = f"{val:.3f} USD/L"
                                     break
                 if prices:
-                    prices["__scraped_at__"] = _NOW_ISO
-                    prices["__published_date__"] = ""
                     return prices
         except Exception as exc:
             logger.debug(f"globalpetrolprices LB error: {exc}")
@@ -654,7 +648,6 @@ class OmegaFuel:
                     try:
                         import json as _json
                         rows = _json.loads(m.group(1))
-                        # rows: [[date, usd_price, local_price], ...] — take latest non-None
                         for row in reversed(rows):
                             if len(row) >= 2 and row[1] is not None:
                                 val = float(row[1])
@@ -665,15 +658,14 @@ class OmegaFuel:
                             continue
                     except Exception:
                         pass
-                # Fallback: scan <script> tags for any JS variable with a price array
+                # Fallback: scan <script> tags for date+price pattern
                 soup = BeautifulSoup(html, "lxml")
                 for script in soup.find_all("script"):
                     txt = script.string or ""
-                    # Look for pattern: ["2026-04-21", 0.208] or similar
                     hits = _re.findall(r'\["20\d\d-\d\d-\d\d",\s*([\d.]+)', txt)
                     if hits:
                         try:
-                            val = float(hits[-1])  # most recent = last match
+                            val = float(hits[-1])
                             if 0.01 < val < 10.0:
                                 results[label] = f"{val:.3f} USD/L"
                                 break
@@ -681,7 +673,7 @@ class OmegaFuel:
                             pass
                 if label in results:
                     continue
-                # Last resort: any visible price-like number in table cells
+                # Last resort: any price-like number in table cells
                 for el in soup.select("table td"):
                     txt = el.get_text(strip=True).replace(",", ".")
                     m2 = _re.search(r'(?<!\d)(\d+\.\d{2,4})(?!\d)', txt)

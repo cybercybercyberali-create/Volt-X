@@ -105,42 +105,5 @@ async def cmd_flushteams(message: Message, lang: str = "en") -> None:
     await message.answer(report, parse_mode="Markdown")
 
 
-@router.message(Command("flushcache"))
-async def cmd_flushcache(message: Message, lang: str = "en") -> None:
-    if message.from_user.id not in settings.admin_id_list:
-        await message.answer(t("admin_only", lang))
-        return
-
-    from services.cache_service import _get_redis, cache as _cache
-
-    redis = await _get_redis()
-    backend = f"Redis @ {settings.redis_url[:30]}..." if redis else "diskcache"
-    logger.info(f"[flushcache] Cache backend: {backend}")
-
-    prefixes = [
-        "apifb:fixtures:", "apifb:standings:", "apifb:live",
-        "apifb:events:",   "sfsc:league_teams:", "sfsc:raw:",
-        "sfsc:team_sched:", "sofascore:sched:",   "tsched_name:",
-        "sfsc:tsched_name:", "backup:apifb:", "backup:sfsc:",
-        "backup:sofascore:", "backup:tsched_name:",
-    ]
-
-    totals: dict[str, int] = {}
-    for prefix in prefixes:
-        n = await _cache.clear_prefix(prefix)
-        if n:
-            totals[prefix] = n
-
-    total_deleted = sum(totals.values())
-    detail = "\n".join(f"  `{p}*`: {n}" for p, n in totals.items()) or "  (nothing found)"
-    report = (
-        f"✅ *Football cache flush complete*\n"
-        f"Backend: `{backend}`\n"
-        f"Total keys deleted: *{total_deleted}*\n{detail}"
-    )
-    logger.info(f"[flushcache] Totals={totals} grand_total={total_deleted}")
-    await message.answer(report, parse_mode="Markdown")
-
-
 def register_stats_handlers(dp) -> None:
     dp.include_router(router)

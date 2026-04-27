@@ -156,7 +156,6 @@ class OmegaWeather:
             )
             if data and "current" in data:
                 current = data["current"]
-                # Open-Meteo gives the observation timestamp in current["time"]
                 obs_time = current.get("time", "")
                 return {
                     "temperature": current["temperature_2m"],
