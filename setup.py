@@ -5652,10 +5652,23 @@ class OmegaFootball:
                 "Cancelled": "CANC",    "Abandoned": "CANC",
             }
             if not raw_status:
-                # empty status: infer from scores
                 hs = ev.get("intHomeScore")
                 aw = ev.get("intAwayScore")
-                status = "FT" if (hs is not None and aw is not None) else "NS"
+                has_scores = (hs is not None and str(hs) not in ("", "null")
+                              and aw is not None and str(aw) not in ("", "null"))
+                if has_scores:
+                    status = "FT"
+                else:
+                    # Fall back to date: if the event was in the past it must be finished
+                    import datetime as _ddt
+                    _date_str = (ev.get("strTimestamp") or ev.get("dateEvent") or "")[:10]
+                    if _date_str:
+                        try:
+                            status = "FT" if _ddt.date.fromisoformat(_date_str) < _ddt.date.today() else "NS"
+                        except ValueError:
+                            status = "NS"
+                    else:
+                        status = "NS"
             else:
                 status = _ST.get(raw_status, raw_status[:3].upper() if len(raw_status) >= 3 else "NS")
             h_score: int | None = None
@@ -5732,14 +5745,18 @@ class OmegaFootball:
                 teams = r.json().get("teams") or []
                 if not teams:
                     return "", [], []
-                # Pick the first soccer team (strSport == "Soccer")
+                # Pick the best-matching soccer team (check name before accepting)
                 team_id = ""
-                for t in teams[:5]:
+                for t in teams[:8]:
                     sport = (t.get("strSport") or "").lower()
-                    if sport in ("soccer", "football", ""):
-                        team_id = t.get("idTeam", "")
-                        if team_id:
-                            break
+                    if sport not in ("soccer", "football", ""):
+                        continue
+                    t_name = (t.get("strTeam") or "").strip()
+                    if t_name and not self._name_matches(team_name, t_name):
+                        continue
+                    team_id = t.get("idTeam", "")
+                    if team_id:
+                        break
                 if not team_id:
                     return "", [], []
                 past_raw:     list = []
@@ -6181,46 +6198,9 @@ class OmegaFootball:
                 except Exception as exc:
                     logger.warning(f"API-Football team schedule {team_name}: {exc}")
 
-        # Source 2 — Sofascore team-search (may or may not work)
-        if not (past or live or upcoming):
-            sf_past, sf_live, sf_upcoming = await self._sofascore_team_schedule_by_name(
-                team_name, league_code
-            )
-            past.extend(sf_past)
-            live.extend(sf_live)
-            upcoming.extend(sf_upcoming)
-
-        # Source 3 — Sofascore day-scan ±14 days (sequential, uses cached data first).
-        # get_fixtures() pre-warms ±7 days; those are instant from cache.
-        # Remaining days make individual HTTP calls sequentially (no rate-limit risk).
-        if not (past or live or upcoming):
-            from datetime import date as _d, timedelta as _td
-            _today = _d.today()
-            _league_ar = MAJOR_LEAGUES.get(league_code.upper(), {}).get("name_ar", "")
-            for _delta in range(-14, 15):
-                _day = (_today + _td(days=_delta)).strftime("%Y-%m-%d")
-                _evs = await self._sofascore_raw_day(_day)
-                for _ev in _evs:
-                    _h = _ev.get("homeTeam", {}).get("name", "")
-                    _a = _ev.get("awayTeam", {}).get("name", "")
-                    if not (self._name_matches(team_name, _h) or
-                            self._name_matches(team_name, _a)):
-                        continue
-                    _n = _normalize_sofascore(_ev)
-                    if not _n:
-                        continue
-                    if _league_ar:
-                        _n["league_ar"] = _league_ar
-                    _st = _n.get("status", "NS")
-                    if _st in ("1H", "2H", "HT", "ET", "PEN"):
-                        live.append(_n)
-                    elif _st == "FT":
-                        past.append(_n)
-                    else:
-                        upcoming.append(_n)
-
-        # Source 4 — TheSportsDB team-specific endpoints (eventslast / eventsnext).
-        # ID-based so events are guaranteed to be for the searched team.
+        # Source 2 — TheSportsDB team-specific endpoints (eventslast / eventsnext).
+        # Placed before Sofascore because Sofascore is often blocked on hosting servers.
+        # Name validation in _fetch_thesportsdb_team prevents wrong-team matches.
         if not (past or live or upcoming):
             try:
                 _, _past_raw, _upcoming_raw = await self._fetch_thesportsdb_team(team_name)
@@ -6248,6 +6228,63 @@ class OmegaFootball:
                         upcoming.append(_n)
             except Exception as _exc:
                 logger.warning(f"TheSportsDB team schedule {team_name}: {_exc}")
+
+        # Source 3 — TheSportsDB league fixtures filtered by team name.
+        # Uses eventsnextleague + eventspastleague; always available, no key needed.
+        if not (past or live or upcoming) and league_code:
+            try:
+                _tsdb_league = await self._fetch_thesportsdb(league_code)
+                for _f in _tsdb_league:
+                    _h = _f.get("home", "")
+                    _a = _f.get("away", "")
+                    if not (self._name_matches(team_name, _h) or
+                            self._name_matches(team_name, _a)):
+                        continue
+                    _st = _f.get("status", "NS")
+                    if _st in ("1H", "2H", "HT", "ET", "PEN"):
+                        live.append(_f)
+                    elif _st == "FT":
+                        past.append(_f)
+                    else:
+                        upcoming.append(_f)
+            except Exception as _exc:
+                logger.warning(f"TheSportsDB league filter {team_name}: {_exc}")
+
+        # Source 4 — Sofascore team search (may be blocked on some hosting servers)
+        if not (past or live or upcoming):
+            sf_past, sf_live, sf_upcoming = await self._sofascore_team_schedule_by_name(
+                team_name, league_code
+            )
+            past.extend(sf_past)
+            live.extend(sf_live)
+            upcoming.extend(sf_upcoming)
+
+        # Source 5 — Sofascore day-scan ±7 days (sequential, uses cached data first)
+        if not (past or live or upcoming):
+            from datetime import date as _d, timedelta as _td
+            _today = _d.today()
+            _league_ar = MAJOR_LEAGUES.get(league_code.upper(), {}).get("name_ar", "")
+            for _delta in range(-7, 8):
+                _day = (_today + _td(days=_delta)).strftime("%Y-%m-%d")
+                _evs = await self._sofascore_raw_day(_day)
+                for _ev in _evs:
+                    _h = _ev.get("homeTeam", {}).get("name", "")
+                    _a = _ev.get("awayTeam", {}).get("name", "")
+                    if not (self._name_matches(team_name, _h) or
+                            self._name_matches(team_name, _a)):
+                        continue
+                    _n = _normalize_sofascore(_ev)
+                    if not _n:
+                        continue
+                    if _league_ar:
+                        _n["league_ar"] = _league_ar
+                    _st = _n.get("status", "NS")
+                    if _st in ("1H", "2H", "HT", "ET", "PEN"):
+                        live.append(_n)
+                    elif _st == "FT":
+                        past.append(_n)
+                    else:
+                        upcoming.append(_n)
 
         past.sort(key=lambda x: x.get("date_utc", ""), reverse=True)
         upcoming.sort(key=lambda x: x.get("date_utc", ""))
