@@ -783,39 +783,9 @@ class OmegaFootball:
                 except Exception as exc:
                     logger.warning(f"API-Football team schedule {team_name}: {exc}")
 
-        # Source 2 — TheSportsDB team-specific endpoints (eventslast / eventsnext).
-        # Placed before Sofascore because Sofascore is often blocked on hosting servers.
-        # Name validation in _fetch_thesportsdb_team prevents wrong-team matches.
-        if not (past or live or upcoming):
-            try:
-                _, _past_raw, _upcoming_raw = await self._fetch_thesportsdb_team(team_name)
-                for _ev in _past_raw:
-                    _n = self._normalize_tsdb(_ev, league_code)
-                    if not _n:
-                        continue
-                    _st = _n.get("status", "NS")
-                    if _st in ("1H", "2H", "HT", "ET", "PEN"):
-                        live.append(_n)
-                    elif _st == "FT":
-                        past.append(_n)
-                    else:
-                        upcoming.append(_n)
-                for _ev in _upcoming_raw:
-                    _n = self._normalize_tsdb(_ev, league_code)
-                    if not _n:
-                        continue
-                    _st = _n.get("status", "NS")
-                    if _st in ("1H", "2H", "HT", "ET", "PEN"):
-                        live.append(_n)
-                    elif _st == "FT":
-                        past.append(_n)
-                    else:
-                        upcoming.append(_n)
-            except Exception as _exc:
-                logger.warning(f"TheSportsDB team schedule {team_name}: {_exc}")
-
-        # Source 3 — TheSportsDB league fixtures filtered by team name.
-        # Uses eventsnextleague + eventspastleague; always available, no key needed.
+        # Source 2 — TheSportsDB league fixtures filtered by team name.
+        # Safe: uses league-wide data (eventsnextleague / eventspastleague) so
+        # we only see matches from the correct league, never a wrong team.
         if not (past or live or upcoming) and league_code:
             try:
                 _tsdb_league = await self._fetch_thesportsdb(league_code)
@@ -835,7 +805,7 @@ class OmegaFootball:
             except Exception as _exc:
                 logger.warning(f"TheSportsDB league filter {team_name}: {_exc}")
 
-        # Source 4 — Sofascore team search (may be blocked on some hosting servers)
+        # Source 3 — Sofascore team search (may be blocked on some hosting servers)
         if not (past or live or upcoming):
             sf_past, sf_live, sf_upcoming = await self._sofascore_team_schedule_by_name(
                 team_name, league_code
@@ -844,7 +814,7 @@ class OmegaFootball:
             live.extend(sf_live)
             upcoming.extend(sf_upcoming)
 
-        # Source 5 — Sofascore day-scan ±7 days (sequential, uses cached data first)
+        # Source 4 — Sofascore day-scan ±7 days (sequential, uses cached data first)
         if not (past or live or upcoming):
             from datetime import date as _d, timedelta as _td
             _today = _d.today()
