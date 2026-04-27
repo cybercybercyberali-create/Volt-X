@@ -45,6 +45,19 @@ _TSDB_LEAGUE_IDS: dict[str, int] = {
 
 _TSDB_BASE = "https://www.thesportsdb.com/api/v1/json/3"
 
+# ESPN API league slugs (free, no key, works from server IPs)
+_ESPN_BASE = "https://site.api.espn.com/apis/site/v2/sports/soccer"
+_ESPN_SLUGS: dict[str, str] = {
+    "PL":  "eng.1",
+    "PD":  "esp.1",
+    "SA":  "ita.1",
+    "BL1": "ger.1",
+    "FL1": "fra.1",
+    "CL":  "uefa.champions",
+    "SPL": "sau.1",
+    "ELC": "eng.2",
+}
+
 # Sofascore tournament IDs (free, no API key)
 _SF_TOURNAMENT_IDS: dict[str, int] = {
     "PL":  17,
@@ -697,6 +710,103 @@ class OmegaFootball:
 
         return past, live, upcoming
 
+    async def _fetch_espn_team_schedule(
+        self, team_name: str, league_code: str
+    ) -> tuple[list, list, list]:
+        """Fetch team schedule from ESPN public API (free, no key, server-IP friendly)."""
+        slug = _ESPN_SLUGS.get(league_code.upper())
+        if not slug:
+            return [], [], []
+        league_info = MAJOR_LEAGUES.get(league_code.upper(), {})
+        past: list[dict] = []
+        live: list[dict] = []
+        upcoming: list[dict] = []
+        _ESPN_STATUS = {
+            "STATUS_FINAL":      "FT",
+            "STATUS_IN_PROGRESS":"1H",
+            "STATUS_HALFTIME":   "HT",
+            "STATUS_SCHEDULED":  "NS",
+            "STATUS_POSTPONED":  "PST",
+            "STATUS_CANCELED":   "CANC",
+            "STATUS_SUSPENDED":  "PST",
+            "STATUS_END_PERIOD": "2H",
+            "STATUS_OVERTIME":   "ET",
+        }
+        try:
+            async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+                # Step 1 — find team ID from league roster
+                r = await client.get(
+                    f"{_ESPN_BASE}/{slug}/teams",
+                    headers={"User-Agent": "Mozilla/5.0"},
+                )
+                if r.status_code != 200:
+                    return [], [], []
+                raw_teams = (r.json().get("sports", [{}])[0]
+                               .get("leagues", [{}])[0]
+                               .get("teams", []))
+                team_id = None
+                for entry in raw_teams:
+                    t = entry.get("team", {})
+                    if (self._name_matches(team_name, t.get("displayName", "")) or
+                            self._name_matches(team_name, t.get("shortDisplayName", ""))):
+                        team_id = t.get("id")
+                        break
+                if not team_id:
+                    return [], [], []
+                # Step 2 — fetch that team's schedule
+                r2 = await client.get(
+                    f"{_ESPN_BASE}/{slug}/teams/{team_id}/schedule",
+                    headers={"User-Agent": "Mozilla/5.0"},
+                )
+                if r2.status_code != 200:
+                    return [], [], []
+                for ev in r2.json().get("events", []):
+                    try:
+                        comp = ev.get("competitions", [{}])[0]
+                        comps = comp.get("competitors", [])
+                        home_c = next((c for c in comps if c.get("homeAway") == "home"), {})
+                        away_c = next((c for c in comps if c.get("homeAway") == "away"), {})
+                        home = home_c.get("team", {}).get("displayName", "")
+                        away = away_c.get("team", {}).get("displayName", "")
+                        if not home or not away:
+                            continue
+                        st_type = comp.get("status", {}).get("type", {})
+                        st_name = st_type.get("name", "STATUS_SCHEDULED")
+                        completed = st_type.get("completed", False)
+                        status = _ESPN_STATUS.get(st_name, "FT" if completed else "NS")
+                        h_score = a_score = None
+                        if status not in ("NS", "PST", "CANC"):
+                            try:
+                                h_score = int(home_c.get("score") or 0)
+                                a_score = int(away_c.get("score") or 0)
+                            except (TypeError, ValueError):
+                                pass
+                        fixture = {
+                            "fixture_id":     ev.get("id"),
+                            "league":         league_info.get("name", league_code),
+                            "league_ar":      league_info.get("name_ar", league_code),
+                            "home":           home,
+                            "away":           away,
+                            "home_score":     h_score,
+                            "away_score":     a_score,
+                            "status":         status,
+                            "status_elapsed": None,
+                            "venue":          comp.get("venue", {}).get("fullName", ""),
+                            "date_utc":       ev.get("date", ""),
+                            "source":         "espn",
+                        }
+                        if status in ("1H", "2H", "HT", "ET", "PEN"):
+                            live.append(fixture)
+                        elif status == "FT":
+                            past.append(fixture)
+                        else:
+                            upcoming.append(fixture)
+                    except Exception:
+                        continue
+        except Exception as exc:
+            logger.warning(f"ESPN team schedule {team_name}: {exc}")
+        return past, live, upcoming
+
     async def get_league_teams(self, league_code: str) -> list[dict]:
         """Return [{id, name}] for a league using the canonical _FALLBACK_TEAMS list."""
         lc = league_code.upper()
@@ -801,7 +911,19 @@ class OmegaFootball:
                 except Exception as exc:
                     logger.warning(f"API-Football team schedule {team_name}: {exc}")
 
-        # Source 2 — TheSportsDB team-specific (eventslast + eventsnext).
+        # Source 2 — ESPN public API (free, no key, not blocked on server IPs)
+        if not (past or live or upcoming) and league_code:
+            try:
+                e_past, e_live, e_upcoming = await self._fetch_espn_team_schedule(
+                    team_name, league_code
+                )
+                past.extend(e_past)
+                live.extend(e_live)
+                upcoming.extend(e_upcoming)
+            except Exception as _exc:
+                logger.warning(f"ESPN team schedule {team_name}: {_exc}")
+
+        # Source 3 — TheSportsDB team-specific (eventslast + eventsnext).
         # league_code is passed so we reject teams from the wrong league
         # (e.g. a tiny English "Barcelona FC" when searching in La Liga).
         if not (past or live or upcoming):
