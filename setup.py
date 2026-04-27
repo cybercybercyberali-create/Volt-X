@@ -5731,8 +5731,21 @@ class OmegaFootball:
             logger.warning(f"TheSportsDB fixtures {league_code}: {exc}")
         return fixtures
 
-    async def _fetch_thesportsdb_team(self, team_name: str) -> tuple[str, list, list]:
-        """Search team on TheSportsDB → (team_id, last_5, next_5)."""
+    async def _fetch_thesportsdb_team(self, team_name: str, league_code: str = "") -> tuple[str, list, list]:
+        """Search team on TheSportsDB → (team_id, last_events, next_events).
+        league_code is used to reject teams from the wrong league."""
+        # Keywords that must appear in TheSportsDB strLeague for each league code
+        _LEAGUE_KW: dict[str, tuple] = {
+            "PL":  ("england", "premier"),
+            "PD":  ("spain", "primera", "liga"),
+            "SA":  ("italy", "serie"),
+            "BL1": ("germany", "bundesliga"),
+            "FL1": ("france", "ligue"),
+            "CL":  ("champions",),
+            "SPL": ("saudi",),
+            "ELC": ("championship",),
+        }
+        expected_kw = _LEAGUE_KW.get(league_code.upper(), ()) if league_code else ()
         try:
             async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
                 r = await client.get(
@@ -5745,15 +5758,20 @@ class OmegaFootball:
                 teams = r.json().get("teams") or []
                 if not teams:
                     return "", [], []
-                # Pick the best-matching soccer team (check name before accepting)
+                # Pick the first soccer team whose name AND league both match
                 team_id = ""
-                for t in teams[:8]:
+                for t in teams[:10]:
                     sport = (t.get("strSport") or "").lower()
                     if sport not in ("soccer", "football", ""):
                         continue
                     t_name = (t.get("strTeam") or "").strip()
                     if t_name and not self._name_matches(team_name, t_name):
                         continue
+                    # Validate league: reject teams from clearly wrong leagues
+                    if expected_kw:
+                        t_league = (t.get("strLeague") or "").lower()
+                        if t_league and not any(kw in t_league for kw in expected_kw):
+                            continue  # wrong league — skip
                     team_id = t.get("idTeam", "")
                     if team_id:
                         break
@@ -6198,9 +6216,39 @@ class OmegaFootball:
                 except Exception as exc:
                     logger.warning(f"API-Football team schedule {team_name}: {exc}")
 
-        # Source 2 — TheSportsDB league fixtures filtered by team name.
-        # Safe: uses league-wide data (eventsnextleague / eventspastleague) so
-        # we only see matches from the correct league, never a wrong team.
+        # Source 2 — TheSportsDB team-specific (eventslast + eventsnext).
+        # league_code is passed so we reject teams from the wrong league
+        # (e.g. a tiny English "Barcelona FC" when searching in La Liga).
+        if not (past or live or upcoming):
+            try:
+                _, _past_raw, _upcoming_raw = await self._fetch_thesportsdb_team(team_name, league_code)
+                for _ev in _past_raw:
+                    _n = self._normalize_tsdb(_ev, league_code)
+                    if not _n:
+                        continue
+                    _st = _n.get("status", "NS")
+                    if _st in ("1H", "2H", "HT", "ET", "PEN"):
+                        live.append(_n)
+                    elif _st == "FT":
+                        past.append(_n)
+                    else:
+                        upcoming.append(_n)
+                for _ev in _upcoming_raw:
+                    _n = self._normalize_tsdb(_ev, league_code)
+                    if not _n:
+                        continue
+                    _st = _n.get("status", "NS")
+                    if _st in ("1H", "2H", "HT", "ET", "PEN"):
+                        live.append(_n)
+                    elif _st == "FT":
+                        past.append(_n)
+                    else:
+                        upcoming.append(_n)
+            except Exception as _exc:
+                logger.warning(f"TheSportsDB team {team_name}: {_exc}")
+
+        # Source 3 — TheSportsDB league-wide events filtered by team name (backup).
+        # eventsnextleague + eventspastleague cover the whole league, safe by design.
         if not (past or live or upcoming) and league_code:
             try:
                 _tsdb_league = await self._fetch_thesportsdb(league_code)
@@ -6220,7 +6268,7 @@ class OmegaFootball:
             except Exception as _exc:
                 logger.warning(f"TheSportsDB league filter {team_name}: {_exc}")
 
-        # Source 3 — Sofascore team search (may be blocked on some hosting servers)
+        # Source 4 — Sofascore team search (may be blocked on some hosting servers)
         if not (past or live or upcoming):
             sf_past, sf_live, sf_upcoming = await self._sofascore_team_schedule_by_name(
                 team_name, league_code
