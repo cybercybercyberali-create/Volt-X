@@ -228,14 +228,21 @@ class OmegaFootball:
                 return None
             raw_status = (ev.get("strStatus") or ev.get("strProgress") or "").strip()
             _ST = {
-                "Match Finished": "FT", "FT": "FT",
+                "Match Finished": "FT", "FT": "FT", "Finished": "FT",
                 "Not Started": "NS",    "NS": "NS",
-                "In Progress": "1H",
-                "Half Time": "HT",
-                "Postponed": "PST",
-                "Cancelled": "CANC",
+                "In Progress": "1H",    "1H": "1H", "2H": "2H",
+                "Half Time": "HT",      "HT": "HT",
+                "Extra Time": "ET",     "Penalty": "PEN",
+                "Postponed": "PST",     "Delayed": "PST",
+                "Cancelled": "CANC",    "Abandoned": "CANC",
             }
-            status = _ST.get(raw_status, "NS" if not raw_status else raw_status[:3])
+            if not raw_status:
+                # empty status: infer from scores
+                hs = ev.get("intHomeScore")
+                aw = ev.get("intAwayScore")
+                status = "FT" if (hs is not None and aw is not None) else "NS"
+            else:
+                status = _ST.get(raw_status, raw_status[:3].upper() if len(raw_status) >= 3 else "NS")
             h_score: int | None = None
             a_score: int | None = None
             if status == "FT":
@@ -378,7 +385,7 @@ class OmegaFootball:
         league_ar_name = MAJOR_LEAGUES.get(league_code_up, {}).get("name_ar", "")
         all_fixtures: list[dict] = []
         if sf_id:
-            for delta in (0, -1, 1, -2, 2, 3):
+            for delta in range(-7, 8):
                 d = (today + timedelta(days=delta)).strftime("%Y-%m-%d")
                 events = await self._sofascore_raw_day(d)
                 for ev in events:
@@ -768,59 +775,64 @@ class OmegaFootball:
             live.extend(sf_live)
             upcoming.extend(sf_upcoming)
 
-        # Source 3 — Reuse already-cached league fixtures (zero extra API calls).
-        # When the user clicks a team, get_fixtures() for the league was already
-        # called and cached. Filter those results by team name.
-        if not (past or live or upcoming) and league_code:
-            try:
-                league_fixtures = await self.get_fixtures(league_code)
-                if isinstance(league_fixtures, list):
-                    for f in league_fixtures:
-                        home = f.get("home", "")
-                        away = f.get("away", "")
-                        if not (self._name_matches(team_name, home) or
-                                self._name_matches(team_name, away)):
-                            continue
-                        status = f.get("status", "NS")
-                        if status in ("1H", "2H", "HT", "ET", "PEN"):
-                            live.append(f)
-                        elif status == "FT":
-                            past.append(f)
-                        else:
-                            upcoming.append(f)
-            except Exception as exc:
-                logger.warning(f"League fixture fallback {team_name}: {exc}")
+        # Source 3 — Sofascore day-scan ±14 days (sequential, uses cached data first).
+        # get_fixtures() pre-warms ±7 days; those are instant from cache.
+        # Remaining days make individual HTTP calls sequentially (no rate-limit risk).
+        if not (past or live or upcoming):
+            from datetime import date as _d, timedelta as _td
+            _today = _d.today()
+            _league_ar = MAJOR_LEAGUES.get(league_code.upper(), {}).get("name_ar", "")
+            for _delta in range(-14, 15):
+                _day = (_today + _td(days=_delta)).strftime("%Y-%m-%d")
+                _evs = await self._sofascore_raw_day(_day)
+                for _ev in _evs:
+                    _h = _ev.get("homeTeam", {}).get("name", "")
+                    _a = _ev.get("awayTeam", {}).get("name", "")
+                    if not (self._name_matches(team_name, _h) or
+                            self._name_matches(team_name, _a)):
+                        continue
+                    _n = _normalize_sofascore(_ev)
+                    if not _n:
+                        continue
+                    if _league_ar:
+                        _n["league_ar"] = _league_ar
+                    _st = _n.get("status", "NS")
+                    if _st in ("1H", "2H", "HT", "ET", "PEN"):
+                        live.append(_n)
+                    elif _st == "FT":
+                        past.append(_n)
+                    else:
+                        upcoming.append(_n)
 
-        # Source 4 — TheSportsDB (ID-based team lookup; trust the ID, no name guard).
-        # The team ID is resolved by name search filtered to soccer, so events
-        # returned are genuinely that team's matches.
+        # Source 4 — TheSportsDB team-specific endpoints (eventslast / eventsnext).
+        # ID-based so events are guaranteed to be for the searched team.
         if not (past or live or upcoming):
             try:
-                _, past_raw, upcoming_raw = await self._fetch_thesportsdb_team(team_name)
-                for ev in past_raw:
-                    n = self._normalize_tsdb(ev, league_code)
-                    if not n:
+                _, _past_raw, _upcoming_raw = await self._fetch_thesportsdb_team(team_name)
+                for _ev in _past_raw:
+                    _n = self._normalize_tsdb(_ev, league_code)
+                    if not _n:
                         continue
-                    status = n.get("status", "NS")
-                    if status in ("1H", "2H", "HT", "ET", "PEN"):
-                        live.append(n)
-                    elif status == "FT":
-                        past.append(n)
+                    _st = _n.get("status", "NS")
+                    if _st in ("1H", "2H", "HT", "ET", "PEN"):
+                        live.append(_n)
+                    elif _st == "FT":
+                        past.append(_n)
                     else:
-                        upcoming.append(n)
-                for ev in upcoming_raw:
-                    n = self._normalize_tsdb(ev, league_code)
-                    if not n:
+                        upcoming.append(_n)
+                for _ev in _upcoming_raw:
+                    _n = self._normalize_tsdb(_ev, league_code)
+                    if not _n:
                         continue
-                    status = n.get("status", "NS")
-                    if status in ("1H", "2H", "HT", "ET", "PEN"):
-                        live.append(n)
-                    elif status == "FT":
-                        past.append(n)
+                    _st = _n.get("status", "NS")
+                    if _st in ("1H", "2H", "HT", "ET", "PEN"):
+                        live.append(_n)
+                    elif _st == "FT":
+                        past.append(_n)
                     else:
-                        upcoming.append(n)
-            except Exception as exc:
-                logger.warning(f"TheSportsDB team schedule {team_name}: {exc}")
+                        upcoming.append(_n)
+            except Exception as _exc:
+                logger.warning(f"TheSportsDB team schedule {team_name}: {_exc}")
 
         past.sort(key=lambda x: x.get("date_utc", ""), reverse=True)
         upcoming.sort(key=lambda x: x.get("date_utc", ""))
