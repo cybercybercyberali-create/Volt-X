@@ -199,19 +199,19 @@ async def _show_fuel(send_to: Message, country: str, lang: str) -> None:
             if not _has_canonical_prices(prices_real):
                 from datetime import date as _d, timedelta as _td
                 today = _d.today()
-                # IPT updates weekly on Mondays
-                last_mon = today - _td(days=today.weekday() % 7)
+                # IPT updates weekly on Thursdays
+                last_thu = today - _td(days=(today.weekday() - 3) % 7)
                 _M = ["يناير","فبراير","مارس","أبريل","مايو","يونيو",
                       "يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"]
-                last_mon_ar = f"{last_mon.day} {_M[last_mon.month-1]} {last_mon.year}"
+                last_thu_ar = f"{last_thu.day} {_M[last_thu.month-1]} {last_thu.year}"
                 prices_real = {
-                    "بنزين 98": "2,423,000 ل.ل.",
-                    "بنزين 95": "2,382,000 ل.ل.",
-                    "ديزل":     "2,466,000 ل.ل.",
+                    "بنزين 98": "2,418,000 ل.ل.",
+                    "بنزين 95": "2,378,000 ل.ل.",
+                    "ديزل":     "2,407,000 ل.ل.",
                     "غاز 10kg": "1,706,000 ل.ل.",
                 }
                 source_label = "IPT Group"
-                ago = f"آخر تحديث: {last_mon_ar}"
+                ago = f"آخر تحديث: {last_thu_ar}"
 
             card_text = fuel_card(
                 prices_llp=prices_real,
@@ -227,10 +227,10 @@ async def _show_fuel(send_to: Message, country: str, lang: str) -> None:
         except Exception as exc:
             logger.error(f"LB fuel display error: {exc}", exc_info=True)
             await send_to.answer(
-                "⛽ أسعار لبنان — آخر معروف (21 أبريل 2026):\n"
-                "بنزين 98: 2,423,000 ل.ل.\n"
-                "بنزين 95: 2,382,000 ل.ل.\n"
-                "ديزل: 2,466,000 ل.ل.\n"
+                "⛽ أسعار لبنان — آخر معروف (24 أبريل 2026):\n"
+                "بنزين 98: 2,418,000 ل.ل.\n"
+                "بنزين 95: 2,378,000 ل.ل.\n"
+                "ديزل: 2,407,000 ل.ل.\n"
                 "غاز 10kg: 1,706,000 ل.ل."
             )
         return

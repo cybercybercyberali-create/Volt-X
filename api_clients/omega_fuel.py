@@ -169,17 +169,17 @@ class OmegaFuel:
                 result["published_date"]  = prices.pop("__published_date__", "")
                 result["prices"] = prices
                 return result
-            # Scraping failed — store hardcoded fallback so cache is always populated
+            # Scraping failed — hardcoded fallback (IPT prices, updated weekly on Thu)
             from datetime import date as _d, timedelta as _td
             _today = _d.today()
-            _last_mon = _today - _td(days=(_today.weekday()) % 7)
+            _last_thu = _today - _td(days=(_today.weekday() - 3) % 7)
             result["prices"] = {
-                "بنزين 98": "2,423,000 ل.ل.",
-                "بنزين 95": "2,382,000 ل.ل.",
-                "ديزل":     "2,466,000 ل.ل.",
+                "بنزين 98": "2,418,000 ل.ل.",
+                "بنزين 95": "2,378,000 ل.ل.",
+                "ديزل":     "2,407,000 ل.ل.",
                 "غاز 10kg": "1,706,000 ل.ل.",
             }
-            result["published_date"] = f"{_last_mon.day}/{_last_mon.month}/{_last_mon.year}"
+            result["published_date"] = f"{_last_thu.day}/{_last_thu.month}/{_last_thu.year}"
             result["scraped_at"]     = datetime.now(timezone.utc).isoformat()
             result["stale"]          = True
             return result
