@@ -753,14 +753,25 @@ class OmegaFootball:
                         break
                 if not team_id:
                     return [], [], []
-                # Step 2 — fetch that team's schedule
-                r2 = await client.get(
-                    f"{_ESPN_BASE}/{slug}/teams/{team_id}/schedule",
-                    headers={"User-Agent": "Mozilla/5.0"},
-                )
-                if r2.status_code != 200:
-                    return [], [], []
-                for ev in r2.json().get("events", []):
+                # Step 2 — fetch that team's schedule (try current season first)
+                events = []
+                _season = _current_season()
+                for _sp in (_season, _season - 1, None):
+                    _params = {"season": str(_sp)} if _sp is not None else {}
+                    r2 = await client.get(
+                        f"{_ESPN_BASE}/{slug}/teams/{team_id}/schedule",
+                        params=_params,
+                        headers={"User-Agent": "Mozilla/5.0"},
+                    )
+                    _data2 = r2.json() if r2.status_code == 200 else {}
+                    _evs = _data2.get("events") or _data2.get("schedule") or []
+                    logger.warning(
+                        f"ESPN {team_name} season={_sp}: status={r2.status_code} events={len(_evs)}"
+                    )
+                    if _evs:
+                        events = _evs
+                        break
+                for ev in events:
                     try:
                         comp = ev.get("competitions", [{}])[0]
                         comps = comp.get("competitors", [])
@@ -881,35 +892,44 @@ class OmegaFootball:
         league_info = MAJOR_LEAGUES.get(league_code.upper(), {}) if league_code else {}
         league_id   = league_info.get("id")
 
-        # Source 1 — API-Football: fetch league fixtures, filter by team name
+        # Source 1 — API-Football: search team ID → team-specific fixtures
         if settings.api_football_key and league_id:
-            for season in (2025, 2024):
-                try:
-                    data = await self._get("/fixtures", {"league": league_id, "season": season, "next": 10})
-                    past_data = await self._get("/fixtures", {"league": league_id, "season": season, "last": 10})
-                    all_raw: list[dict] = []
-                    if data and "response" in data:
-                        all_raw += data["response"]
-                    if past_data and "response" in past_data:
-                        all_raw += past_data["response"]
-                    matched = []
-                    for f in all_raw:
-                        home = f.get("teams", {}).get("home", {}).get("name", "")
-                        away = f.get("teams", {}).get("away", {}).get("name", "")
-                        if self._name_matches(team_name, home) or self._name_matches(team_name, away):
-                            matched.append(_normalize_fixture(f, league_code.upper()))
-                    if matched:
-                        for n in matched:
-                            status = n.get("status", "NS")
-                            if status in ("1H", "2H", "HT", "ET", "PEN"):
-                                live.append(n)
-                            elif status == "FT":
-                                past.append(n)
-                            else:
-                                upcoming.append(n)
-                        break   # found results — no need to try next season
-                except Exception as exc:
-                    logger.warning(f"API-Football team schedule {team_name}: {exc}")
+            try:
+                season = _current_season()
+                # Step 1: find team ID for this team in this league
+                team_resp = await self._get(
+                    "/teams",
+                    {"name": team_name, "league": league_id, "season": season},
+                )
+                team_id = None
+                if team_resp and team_resp.get("response"):
+                    for entry in team_resp["response"]:
+                        t_name = entry.get("team", {}).get("name", "")
+                        if self._name_matches(team_name, t_name):
+                            team_id = entry["team"]["id"]
+                            break
+                    if not team_id:
+                        team_id = team_resp["response"][0]["team"]["id"]
+                logger.warning(f"API-Football team search '{team_name}': team_id={team_id}")
+                if team_id:
+                    # Step 2: fetch that team's own fixtures (no league-wide filtering)
+                    for _p in (
+                        {"team": team_id, "season": season, "last": 5},
+                        {"team": team_id, "season": season, "next": 5},
+                    ):
+                        _d = await self._get("/fixtures", _p)
+                        if _d and "response" in _d:
+                            for _f in _d["response"]:
+                                _n = _normalize_fixture(_f, league_code.upper())
+                                _s = _n.get("status", "NS")
+                                if _s in ("1H", "2H", "HT", "ET", "PEN"):
+                                    live.append(_n)
+                                elif _s == "FT":
+                                    past.append(_n)
+                                else:
+                                    upcoming.append(_n)
+            except Exception as exc:
+                logger.warning(f"API-Football team schedule {team_name}: {exc}")
 
         # Source 2 — ESPN public API (free, no key, not blocked on server IPs)
         if not (past or live or upcoming) and league_code:
