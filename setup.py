@@ -4689,11 +4689,53 @@ class OmegaFuel:
         _skey = getattr(settings, "scraper_api_key", "") or ""
         if _skey:
             import httpx as _httpx
+            import json as _json
             _ipt_url = "https://www.iptgroup.com.lb/ipt/en/our-stations/fuel-prices"
-            # Try JS-rendered first (5 credits), then plain HTML (1 credit) as fallback
+
+            def _extract_prices_from_response(html: str) -> dict:
+                """Try __NEXT_DATA__ JSON first, then regex on plain text."""
+                # 1. __NEXT_DATA__ JSON embed (Next.js / React SSR)
+                _jm = re.search(
+                    r'<script[^>]+id=["\']__NEXT_DATA__["\'][^>]*>\s*(\{.+?)\s*</script>',
+                    html, re.DOTALL)
+                if _jm:
+                    try:
+                        _obj = _json.loads(_jm.group(1))
+                        _obj_str = str(_obj)
+                        _p = _extract_llp_prices(_obj_str)
+                        if len(_p) >= 2:
+                            return _p
+                    except Exception:
+                        pass
+                # 2. Regex on stripped plain text
+                _plain = re.sub(r'<[^>]+>', ' ', html)
+                _p = _extract_llp_prices(_plain)
+                if len(_p) >= 2:
+                    return _p
+                # 3. Flexible: find large LBP numbers near fuel keywords (no currency label needed)
+                _fuel_kw = [
+                    (r'(?:UNL\s*95|بنزين\s*95|Benzin(?:e)?\s*95)[\s\S]{0,60}?((?:\d{1,3},){1,3}\d{3})', 'بنزين 95'),
+                    (r'(?:UNL\s*98|بنزين\s*98|Benzin(?:e)?\s*98)[\s\S]{0,60}?((?:\d{1,3},){1,3}\d{3})', 'بنزين 98'),
+                    (r'(?:Diesel|ديزل|مازوت|Mazout)[\s\S]{0,60}?((?:\d{1,3},){1,3}\d{3})', 'ديزل'),
+                    (r'(?:Gas\s*(?:Oil)?|LPG|غاز)[\s\S]{0,60}?((?:\d{1,3},){1,3}\d{3})', 'غاز 10kg'),
+                ]
+                _fp = {}
+                for _pat, _lbl in _fuel_kw:
+                    if _lbl in _fp:
+                        continue
+                    _m = re.search(_pat, _plain, re.IGNORECASE)
+                    if _m:
+                        _v = int(_m.group(1).replace(",", ""))
+                        if _v > 100_000:
+                            _fp[_lbl] = f"{_v:,} ل.ل."
+                if len(_fp) >= 2:
+                    return _fp
+                return {}
+
+            # Try JS-rendered first (5 credits), then plain HTML (1 credit)
             for _render in ("true", "false"):
                 try:
-                    async with _httpx.AsyncClient(timeout=35.0) as _cl:
+                    async with _httpx.AsyncClient(timeout=40.0) as _cl:
                         _r = await _cl.get(
                             "https://api.scraperapi.com/",
                             params={
@@ -4704,21 +4746,23 @@ class OmegaFuel:
                                 "country_code": "lb",
                             },
                         )
-                        if _r.status_code != 200 or len(_r.text) < 500:
-                            continue
-                        _plain = re.sub(r'<[^>]+>', ' ', _r.text)
-                        _prices = _extract_llp_prices(_plain)
-                        if not _prices:
-                            _prices = _extract_llp_prices(_r.text)
-                        if len(_prices) >= 2:
-                            _pub = _extract_date(_plain)
-                            _prices["__scraped_at__"] = _NOW_ISO
-                            _prices["__published_date__"] = _pub
-                            logger.info(f"ScraperAPI IPT prices (render={_render}): {_prices}")
-                            return _prices
-                        logger.debug(f"ScraperAPI render={_render}: found {len(_prices)} prices, retrying")
+                    logger.warning(
+                        f"ScraperAPI render={_render}: status={_r.status_code} "
+                        f"len={len(_r.text)} snippet={_r.text[:300]!r}"
+                    )
+                    if _r.status_code != 200 or len(_r.text) < 500:
+                        continue
+                    _prices = _extract_prices_from_response(_r.text)
+                    if len(_prices) >= 2:
+                        _plain2 = re.sub(r'<[^>]+>', ' ', _r.text)
+                        _pub = _extract_date(_plain2)
+                        _prices["__scraped_at__"] = _NOW_ISO
+                        _prices["__published_date__"] = _pub
+                        logger.warning(f"ScraperAPI IPT prices (render={_render}): {_prices}")
+                        return _prices
+                    logger.warning(f"ScraperAPI render={_render}: no prices found, trying next")
                 except Exception as _exc:
-                    logger.debug(f"ScraperAPI error (render={_render}): {_exc}")
+                    logger.warning(f"ScraperAPI error (render={_render}): {_exc}")
 
         # Source 0: IPT Group — correct URL + fallbacks
         ipt_urls = [
