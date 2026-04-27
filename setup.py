@@ -6226,6 +6226,10 @@ class OmegaFootball:
                     _n = self._normalize_tsdb(_ev, league_code)
                     if not _n:
                         continue
+                    # Discard if neither side matches our team (TheSportsDB data bugs)
+                    if not (self._name_matches(team_name, _n.get("home", "")) or
+                            self._name_matches(team_name, _n.get("away", ""))):
+                        continue
                     _st = _n.get("status", "NS")
                     if _st in ("1H", "2H", "HT", "ET", "PEN"):
                         live.append(_n)
@@ -6236,6 +6240,10 @@ class OmegaFootball:
                 for _ev in _upcoming_raw:
                     _n = self._normalize_tsdb(_ev, league_code)
                     if not _n:
+                        continue
+                    # Discard if neither side matches our team (TheSportsDB data bugs)
+                    if not (self._name_matches(team_name, _n.get("home", "")) or
+                            self._name_matches(team_name, _n.get("away", ""))):
                         continue
                     _st = _n.get("status", "NS")
                     if _st in ("1H", "2H", "HT", "ET", "PEN"):
