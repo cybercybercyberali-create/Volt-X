@@ -4686,7 +4686,7 @@ class OmegaFuel:
         }
 
         # Source 0a: ScraperAPI — JS-rendered fetch (IPT is a React SPA)
-        _skey = getattr(settings, "scraper_api_key", "") or ""
+        _skey = (getattr(settings, "scraper_api_key", "") or "").strip()
         if _skey:
             import httpx as _httpx
             import json as _json
@@ -4904,7 +4904,7 @@ class OmegaFuel:
         from bs4 import BeautifulSoup
         from config import settings as _cfg
 
-        _skey = getattr(_cfg, "scraper_api_key", "") or ""
+        _skey = (getattr(_cfg, "scraper_api_key", "") or "").strip()
         result: dict[str, dict] = {}
 
         async def _parse_gpp_html(html: str, fuel_key: str) -> None:
@@ -4983,7 +4983,7 @@ class OmegaFuel:
         import httpx as _httpx, urllib.parse as _up
         from config import settings as _cfg
         eia_key = getattr(_cfg, "eia_api_key", "") or "DEMO_KEY"
-        scraper_key = getattr(_cfg, "scraper_api_key", "") or ""
+        scraper_key = (getattr(_cfg, "scraper_api_key", "") or "").strip()
         results: dict[str, str] = {}
         try:
             async with _httpx.AsyncClient(timeout=20.0) as cl:
@@ -5075,7 +5075,7 @@ class OmegaFuel:
         import httpx as _httpx, re as _re
         from bs4 import BeautifulSoup
         from config import settings as _cfg
-        _skey = getattr(_cfg, "scraper_api_key", "") or ""
+        _skey = (getattr(_cfg, "scraper_api_key", "") or "").strip()
         slug = _GPP_COUNTRY_SLUGS.get(country_code)
         if not slug or not _skey:
             return None
