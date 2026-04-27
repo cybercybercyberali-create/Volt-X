@@ -310,7 +310,14 @@ class OmegaFootball:
                 teams = r.json().get("teams") or []
                 if not teams:
                     return "", [], []
-                team_id = teams[0].get("idTeam", "")
+                # Pick the first soccer team (strSport == "Soccer")
+                team_id = ""
+                for t in teams[:5]:
+                    sport = (t.get("strSport") or "").lower()
+                    if sport in ("soccer", "football", ""):
+                        team_id = t.get("idTeam", "")
+                        if team_id:
+                            break
                 if not team_id:
                     return "", [], []
                 past_raw:     list = []
@@ -584,17 +591,9 @@ class OmegaFootball:
     async def _sofascore_team_schedule_by_name(
         self, team_name: str, league_code: str
     ) -> tuple[list, list, list]:
-        """Return (past, live, upcoming) for a team via Sofascore.
-
-        Strategy:
-          1. Try Sofascore team-search API → fetch team schedule directly.
-          2. Fall back to concurrent day-scan (±21 days) filtered by team name.
-        No tournament-ID filter — we show all competitions so users always
-        see results even when a team is mid-cup-run.
+        """Return (past, live, upcoming) for a team via Sofascore team-search API.
+        Shows all competitions (no tournament-ID filter).
         """
-        import asyncio as _aio
-        from datetime import date as _date, timedelta as _td
-
         league_ar_name = MAJOR_LEAGUES.get(league_code.upper(), {}).get("name_ar", "")
         past: list[dict] = []
         live: list[dict] = []
@@ -653,41 +652,6 @@ class OmegaFootball:
                         _classify(upcoming, next_raw)
         except Exception as exc:
             logger.warning(f"Sofascore team search '{team_name}': {exc}")
-
-        # ── Step 2: day-scan fallback (always works, uses cached daily data) ──
-        if not (past or live or upcoming):
-            today = _date.today()
-            dates = [
-                (today + _td(days=d)).strftime("%Y-%m-%d")
-                for d in range(-21, 22)
-            ]
-            all_day_events = await _aio.gather(
-                *[self._sofascore_raw_day(d) for d in dates],
-                return_exceptions=True,
-            )
-            for day_events in all_day_events:
-                if isinstance(day_events, Exception) or not day_events:
-                    continue
-                for ev in day_events:
-                    home = ev.get("homeTeam", {}).get("name", "")
-                    away = ev.get("awayTeam", {}).get("name", "")
-                    if not (
-                        self._name_matches(team_name, home)
-                        or self._name_matches(team_name, away)
-                    ):
-                        continue
-                    n = _normalize_sofascore(ev)
-                    if not n:
-                        continue
-                    if league_ar_name:
-                        n["league_ar"] = league_ar_name
-                    status = n.get("status", "NS")
-                    if status in ("1H", "2H", "HT", "ET", "PEN"):
-                        live.append(n)
-                    elif status == "FT":
-                        past.append(n)
-                    else:
-                        upcoming.append(n)
 
         return past, live, upcoming
 
@@ -795,7 +759,7 @@ class OmegaFootball:
                 except Exception as exc:
                     logger.warning(f"API-Football team schedule {team_name}: {exc}")
 
-        # Source 2 — Sofascore (free, no key) — search by name, filter by league
+        # Source 2 — Sofascore team-search (may or may not work)
         if not (past or live or upcoming):
             sf_past, sf_live, sf_upcoming = await self._sofascore_team_schedule_by_name(
                 team_name, league_code
@@ -804,37 +768,59 @@ class OmegaFootball:
             live.extend(sf_live)
             upcoming.extend(sf_upcoming)
 
-        # Source 3 — TheSportsDB (if both paid + Sofascore failed)
-        # Guard: only keep fixtures where the searched team actually plays.
+        # Source 3 — Reuse already-cached league fixtures (zero extra API calls).
+        # When the user clicks a team, get_fixtures() for the league was already
+        # called and cached. Filter those results by team name.
+        if not (past or live or upcoming) and league_code:
+            try:
+                league_fixtures = await self.get_fixtures(league_code)
+                if isinstance(league_fixtures, list):
+                    for f in league_fixtures:
+                        home = f.get("home", "")
+                        away = f.get("away", "")
+                        if not (self._name_matches(team_name, home) or
+                                self._name_matches(team_name, away)):
+                            continue
+                        status = f.get("status", "NS")
+                        if status in ("1H", "2H", "HT", "ET", "PEN"):
+                            live.append(f)
+                        elif status == "FT":
+                            past.append(f)
+                        else:
+                            upcoming.append(f)
+            except Exception as exc:
+                logger.warning(f"League fixture fallback {team_name}: {exc}")
+
+        # Source 4 — TheSportsDB (ID-based team lookup; trust the ID, no name guard).
+        # The team ID is resolved by name search filtered to soccer, so events
+        # returned are genuinely that team's matches.
         if not (past or live or upcoming):
-            _, past_raw, upcoming_raw = await self._fetch_thesportsdb_team(team_name)
-            for ev in past_raw:
-                n = self._normalize_tsdb(ev, league_code)
-                if not n:
-                    continue
-                home, away = n.get("home", ""), n.get("away", "")
-                if not (self._name_matches(team_name, home) or self._name_matches(team_name, away)):
-                    continue
-                if n.get("status") in ("1H", "2H", "HT", "ET", "PEN"):
-                    live.append(n)
-                elif n.get("status") == "FT":
-                    past.append(n)
-                else:
-                    upcoming.append(n)
-            for ev in upcoming_raw:
-                n = self._normalize_tsdb(ev, league_code)
-                if not n:
-                    continue
-                home, away = n.get("home", ""), n.get("away", "")
-                if not (self._name_matches(team_name, home) or self._name_matches(team_name, away)):
-                    continue
-                status = n.get("status", "NS")
-                if status in ("1H", "2H", "HT", "ET", "PEN"):
-                    live.append(n)
-                elif status == "FT":
-                    past.append(n)
-                else:
-                    upcoming.append(n)
+            try:
+                _, past_raw, upcoming_raw = await self._fetch_thesportsdb_team(team_name)
+                for ev in past_raw:
+                    n = self._normalize_tsdb(ev, league_code)
+                    if not n:
+                        continue
+                    status = n.get("status", "NS")
+                    if status in ("1H", "2H", "HT", "ET", "PEN"):
+                        live.append(n)
+                    elif status == "FT":
+                        past.append(n)
+                    else:
+                        upcoming.append(n)
+                for ev in upcoming_raw:
+                    n = self._normalize_tsdb(ev, league_code)
+                    if not n:
+                        continue
+                    status = n.get("status", "NS")
+                    if status in ("1H", "2H", "HT", "ET", "PEN"):
+                        live.append(n)
+                    elif status == "FT":
+                        past.append(n)
+                    else:
+                        upcoming.append(n)
+            except Exception as exc:
+                logger.warning(f"TheSportsDB team schedule {team_name}: {exc}")
 
         past.sort(key=lambda x: x.get("date_utc", ""), reverse=True)
         upcoming.sort(key=lambda x: x.get("date_utc", ""))
