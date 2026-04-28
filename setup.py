@@ -5526,6 +5526,25 @@ _ESPN_SLUGS: dict[str, str] = {
     "ELC": "eng.2",
 }
 
+_365_BASE = "https://webws.365scores.com"
+_365_HEADERS: dict[str, str] = {
+    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.365scores.com/",
+    "Origin": "https://www.365scores.com",
+}
+_365_LEAGUE_KW: dict[str, tuple] = {
+    "PL":  ("premier league",),
+    "PD":  ("la liga",),
+    "SA":  ("serie a",),
+    "BL1": ("bundesliga",),
+    "FL1": ("ligue 1",),
+    "CL":  ("champions league",),
+    "SPL": ("saudi pro league", "saudi professional"),
+    "ELC": ("championship",),
+}
+
 # Sofascore tournament IDs (free, no API key)
 _SF_TOURNAMENT_IDS: dict[str, int] = {
     "PL":  17,
@@ -5873,6 +5892,18 @@ class OmegaFootball:
         from datetime import date, timedelta
         today = date.today()
 
+        # Source 0 — 365scores (free, no key, live+scheduled+finished)
+        fixtures_365 = await self._fetch_365_league(league_code_up)
+        if fixtures_365:
+            if status.upper() == "LIVE":
+                live_365 = [f for f in fixtures_365 if f.get("status") in ("1H","2H","HT","ET","PEN")]
+                if live_365:
+                    await cache.set(cache_key, live_365, ttl=ttl)
+                    return live_365
+            else:
+                await cache.set(cache_key, fixtures_365, ttl=ttl)
+                return fixtures_365
+
         # Source 1 — API-Football (RapidAPI)
         if settings.api_football_key:
             params: dict[str, Any] = {"league": league_id, "season": _current_season()}
@@ -6036,6 +6067,11 @@ class OmegaFootball:
         cached = await cache.get(cache_key)
         if cached is not None:
             return cached
+        # Source 0 — 365scores live
+        live_365 = await self._fetch_365_live()
+        if live_365:
+            await cache.set(cache_key, live_365, ttl=60)
+            return live_365
         # Try API-Football first
         if settings.api_football_key:
             league_ids = "-".join(str(v["id"]) for v in MAJOR_LEAGUES.values())
@@ -6364,6 +6400,199 @@ class OmegaFootball:
             logger.warning(f"ESPN team schedule {team_name}: {exc}")
         return past, live, upcoming
 
+    @staticmethod
+    def _normalize_365(game: dict, league_code: str) -> dict | None:
+        home = game.get("homeCompetitor") or {}
+        away = game.get("awayCompetitor") or {}
+        h_name = home.get("name", "")
+        a_name = away.get("name", "")
+        if not h_name or not a_name:
+            return None
+        sg = game.get("statusGroup", 1)
+        gid = game.get("gameStatusId", 1)
+        if sg == 4 or gid == 11:
+            status = "FT"
+        elif sg in (2, 3):
+            if gid == 3: status = "HT"
+            elif gid in (5, 6): status = "ET"
+            elif gid == 7: status = "PEN"
+            else: status = "1H"
+        elif gid == 12: status = "PST"
+        elif gid == 13: status = "CANC"
+        else: status = "NS"
+        h_score = a_score = None
+        if status != "NS":
+            try: h_score = int(home.get("score") or 0)
+            except: pass
+            try: a_score = int(away.get("score") or 0)
+            except: pass
+        elapsed = str(game.get("gameTime", "")) if status in ("1H", "2H", "ET") else None
+        date_utc = ""
+        gdate = game.get("gameDate", "")
+        stime = game.get("startTime", "")
+        if gdate and stime:
+            try:
+                from datetime import datetime as _dt
+                d = _dt.strptime(f"{gdate} {stime}", "%d/%m/%Y %H:%M")
+                date_utc = d.strftime("%Y-%m-%dT%H:%M:00+00:00")
+            except Exception:
+                pass
+        league_info = MAJOR_LEAGUES.get(league_code, {})
+        return {
+            "fixture_id":     game.get("id"),
+            "league":         game.get("competitionDisplayName") or league_info.get("name", league_code),
+            "league_ar":      league_info.get("name_ar", league_code),
+            "home":           h_name,
+            "away":           a_name,
+            "home_score":     h_score,
+            "away_score":     a_score,
+            "status":         status,
+            "status_elapsed": elapsed,
+            "venue":          "",
+            "date_utc":       date_utc,
+            "source":         "365scores",
+        }
+
+    async def _fetch_365_day(self, date_str: str) -> list[dict]:
+        """Fetch all football games for a date (YYYY-MM-DD) from 365scores."""
+        cache_key = f"365:day:{date_str}"
+        cached = await cache.get(cache_key)
+        if cached is not None:
+            return cached
+        try:
+            from datetime import datetime as _dt
+            d = _dt.strptime(date_str, "%Y-%m-%d")
+            date_365 = d.strftime("%d/%m/%Y")
+            async with httpx.AsyncClient(timeout=12, follow_redirects=True) as cl:
+                r = await cl.get(
+                    f"{_365_BASE}/web/games/",
+                    params={"appTypeId": "5", "langId": "1", "sports": "1",
+                            "startDate": date_365, "endDate": date_365},
+                    headers=_365_HEADERS,
+                )
+                if r.status_code == 200:
+                    games = r.json().get("games") or []
+                    logger.warning(f"365scores {date_str}: {len(games)} games")
+                    await cache.set(cache_key, games, ttl=120)
+                    return games
+                logger.warning(f"365scores {date_str}: HTTP {r.status_code}")
+        except Exception as exc:
+            logger.warning(f"365scores day {date_str}: {exc}")
+        return []
+
+    async def _fetch_365_league(self, league_code: str) -> list[dict]:
+        """Fetch today ± 3 days of fixtures for a specific league from 365scores."""
+        from datetime import date as _d, timedelta as _td
+        kws = _365_LEAGUE_KW.get(league_code.upper(), ())
+        if not kws:
+            return []
+        today = _d.today()
+        fixtures: list[dict] = []
+        seen: set = set()
+        for delta in range(-3, 4):
+            day = (today + _td(days=delta)).isoformat()
+            games = await self._fetch_365_day(day)
+            for g in games:
+                comp = (g.get("competitionDisplayName") or "").lower()
+                if not any(kw in comp for kw in kws):
+                    continue
+                n = self._normalize_365(g, league_code)
+                if n and n["fixture_id"] not in seen:
+                    seen.add(n["fixture_id"])
+                    fixtures.append(n)
+        return fixtures
+
+    async def _fetch_365_live(self) -> list[dict]:
+        """Fetch live games from 365scores."""
+        try:
+            async with httpx.AsyncClient(timeout=10, follow_redirects=True) as cl:
+                r = await cl.get(
+                    f"{_365_BASE}/web/games/live/",
+                    params={"appTypeId": "5", "langId": "1", "sports": "1"},
+                    headers=_365_HEADERS,
+                )
+                if r.status_code != 200:
+                    logger.warning(f"365scores live: HTTP {r.status_code}")
+                    return []
+                games = r.json().get("games") or []
+                fixtures = []
+                for g in games:
+                    sg = g.get("statusGroup", 1)
+                    if sg not in (2, 3):
+                        continue
+                    comp = (g.get("competitionDisplayName") or "").lower()
+                    league_code = ""
+                    for lc, kws in _365_LEAGUE_KW.items():
+                        if any(kw in comp for kw in kws):
+                            league_code = lc
+                            break
+                    if not league_code:
+                        continue
+                    n = self._normalize_365(g, league_code)
+                    if n:
+                        fixtures.append(n)
+                logger.warning(f"365scores live: {len(fixtures)} major-league games")
+                return fixtures
+        except Exception as exc:
+            logger.warning(f"365scores live error: {exc}")
+        return []
+
+    async def _fetch_365_team(self, team_name: str, league_code: str) -> tuple[list, list, list]:
+        """Fetch team schedule from 365scores via competitor search + schedule."""
+        past: list[dict] = []
+        live: list[dict] = []
+        upcoming: list[dict] = []
+        try:
+            async with httpx.AsyncClient(timeout=12, follow_redirects=True) as cl:
+                # Step 1: search for competitor ID
+                rs = await cl.get(
+                    f"{_365_BASE}/web/search/",
+                    params={"query": team_name, "appTypeId": "5", "langId": "1"},
+                    headers=_365_HEADERS,
+                )
+                if rs.status_code != 200:
+                    return [], [], []
+                comps = rs.json().get("competitors") or rs.json().get("results") or []
+                comp_id = None
+                for c in comps[:10]:
+                    name = c.get("name", "")
+                    sport = c.get("sport", {})
+                    sport_id = sport.get("id") if isinstance(sport, dict) else sport
+                    if sport_id not in (1, None):
+                        continue
+                    if self._name_matches(team_name, name):
+                        comp_id = c.get("id")
+                        break
+                if not comp_id:
+                    return [], [], []
+                logger.warning(f"365scores team \'{team_name}\': competitor_id={comp_id}")
+                # Step 2: last + next games
+                for endpoint, dest_status in (
+                    (f"/web/competitor/{comp_id}/lastGames/", "past"),
+                    (f"/web/competitor/{comp_id}/nextGames/", "upcoming"),
+                ):
+                    rg = await cl.get(
+                        f"{_365_BASE}{endpoint}",
+                        params={"appTypeId": "5", "langId": "1", "count": "5"},
+                        headers=_365_HEADERS,
+                    )
+                    if rg.status_code != 200:
+                        continue
+                    for g in (rg.json().get("games") or []):
+                        n = self._normalize_365(g, league_code)
+                        if not n:
+                            continue
+                        st = n.get("status", "NS")
+                        if st in ("1H", "2H", "HT", "ET", "PEN"):
+                            live.append(n)
+                        elif st == "FT":
+                            past.append(n)
+                        else:
+                            upcoming.append(n)
+        except Exception as exc:
+            logger.warning(f"365scores team {team_name}: {exc}")
+        return past, live, upcoming
+
     async def get_league_teams(self, league_code: str) -> list[dict]:
         """Return [{id, name}] for a league using the canonical _FALLBACK_TEAMS list."""
         lc = league_code.upper()
@@ -6437,6 +6666,15 @@ class OmegaFootball:
 
         league_info = MAJOR_LEAGUES.get(league_code.upper(), {}) if league_code else {}
         league_id   = league_info.get("id")
+
+        # Source 0 — 365scores competitor API
+        try:
+            s0_past, s0_live, s0_upcoming = await self._fetch_365_team(team_name, league_code)
+            past.extend(s0_past)
+            live.extend(s0_live)
+            upcoming.extend(s0_upcoming)
+        except Exception as _exc:
+            logger.warning(f"365scores team schedule {team_name}: {_exc}")
 
         # Source 1 — API-Football: search team ID → team-specific fixtures
         if settings.api_football_key and league_id:
