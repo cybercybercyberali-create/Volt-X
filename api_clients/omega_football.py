@@ -580,8 +580,74 @@ class OmegaFootball:
                     fixtures.append(_normalize_fixture(raw, code))
                 await cache.set(cache_key, fixtures, ttl=CACHE_TTL.get("football_live", 60))
                 return fixtures
-        # Sofascore fallback — free, no key
-        return await self._sofascore_live()
+        # ESPN fallback — scan all major leagues for in-progress matches
+        return await self._espn_live()
+
+    async def _espn_live(self) -> list | dict:
+        """Fetch live matches from ESPN scoreboard for all major leagues."""
+        fixtures: list[dict] = []
+        _ESPN_STATUS = {
+            "STATUS_FINAL": "FT", "STATUS_IN_PROGRESS": "1H",
+            "STATUS_HALFTIME": "HT", "STATUS_SCHEDULED": "NS",
+            "STATUS_POSTPONED": "PST", "STATUS_CANCELED": "CANC",
+            "STATUS_END_PERIOD": "2H", "STATUS_OVERTIME": "ET",
+        }
+        try:
+            async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+                for lc, slug in _ESPN_SLUGS.items():
+                    league_info = MAJOR_LEAGUES.get(lc, {})
+                    try:
+                        r = await client.get(
+                            f"{_ESPN_BASE}/{slug}/scoreboard",
+                            headers={"User-Agent": "Mozilla/5.0"},
+                        )
+                        if r.status_code != 200:
+                            continue
+                        for ev in r.json().get("events", []):
+                            comp = ev.get("competitions", [{}])[0]
+                            comps = comp.get("competitors", [])
+                            home_c = next((c for c in comps if c.get("homeAway") == "home"), {})
+                            away_c = next((c for c in comps if c.get("homeAway") == "away"), {})
+                            home = home_c.get("team", {}).get("displayName", "")
+                            away = away_c.get("team", {}).get("displayName", "")
+                            if not home or not away:
+                                continue
+                            st_type = comp.get("status", {}).get("type", {})
+                            st_name = st_type.get("name", "STATUS_SCHEDULED")
+                            completed = st_type.get("completed", False)
+                            status = _ESPN_STATUS.get(st_name, "FT" if completed else "NS")
+                            if status not in ("1H", "2H", "HT", "ET", "PEN"):
+                                continue
+                            elapsed = comp.get("status", {}).get("displayClock", "")
+                            def _sc(v):
+                                if isinstance(v, dict): v = v.get("value") or v.get("displayValue")
+                                try: return int(float(str(v)))
+                                except: return 0
+                            fixtures.append({
+                                "fixture_id":     ev.get("id"),
+                                "league":         league_info.get("name", lc),
+                                "league_ar":      league_info.get("name_ar", lc),
+                                "home":           home,
+                                "away":           away,
+                                "home_score":     _sc(home_c.get("score")),
+                                "away_score":     _sc(away_c.get("score")),
+                                "status":         status,
+                                "status_elapsed": elapsed,
+                                "venue":          comp.get("venue", {}).get("fullName", ""),
+                                "date_utc":       ev.get("date", ""),
+                                "source":         "espn",
+                            })
+                    except Exception:
+                        continue
+        except Exception as exc:
+            logger.warning(f"ESPN live error: {exc}")
+        if fixtures:
+            await cache.set("apifb:live", fixtures, ttl=60)
+            return fixtures
+        stale = await cache.get_stale("apifb:live")
+        if stale and stale.get("data"):
+            return stale["data"]
+        return {"error": True, "message": "No live matches right now"}
 
     async def _sofascore_live(self) -> list | dict:
         """Fetch live matches from Sofascore (no API key needed)."""
@@ -771,6 +837,17 @@ class OmegaFootball:
                     if _evs:
                         events = _evs
                         break
+                def _espn_score(val) -> int | None:
+                    """ESPN returns score as str '3', int 3, or dict {'value':3.0}."""
+                    if val is None:
+                        return None
+                    if isinstance(val, dict):
+                        val = val.get("value") or val.get("displayValue")
+                    try:
+                        return int(float(str(val)))
+                    except (TypeError, ValueError):
+                        return None
+
                 for ev in events:
                     try:
                         comp = ev.get("competitions", [{}])[0]
@@ -787,11 +864,12 @@ class OmegaFootball:
                         status = _ESPN_STATUS.get(st_name, "FT" if completed else "NS")
                         h_score = a_score = None
                         if status not in ("NS", "PST", "CANC"):
-                            try:
-                                h_score = int(home_c.get("score") or 0)
-                                a_score = int(away_c.get("score") or 0)
-                            except (TypeError, ValueError):
-                                pass
+                            h_score = _espn_score(home_c.get("score"))
+                            a_score = _espn_score(away_c.get("score"))
+                            if h_score is None:
+                                h_score = _espn_score(home_c.get("linescores", [{}])[0].get("value") if home_c.get("linescores") else None)
+                            if a_score is None:
+                                a_score = _espn_score(away_c.get("linescores", [{}])[0].get("value") if away_c.get("linescores") else None)
                         fixture = {
                             "fixture_id":     ev.get("id"),
                             "league":         league_info.get("name", league_code),
