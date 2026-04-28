@@ -4451,7 +4451,7 @@ _STATIC_FUEL_PRICES: dict[str, dict] = {
     "YE": {"بنزين": "0.530 USD/L", "ديزل": "0.470 USD/L"},
     # Europe & Global
     "TR": {"بنزين 95": "1.592 USD/L", "ديزل": "1.744 USD/L"},
-    "US": {"Gasoline (Regular)": "1.070 USD/L", "Diesel": "1.427 USD/L"},
+    "US": {"Gasoline (Regular)": "1.160 USD/L", "Diesel": "1.300 USD/L"},
     "DE": {"Super E10 (95)": "2.393 USD/L", "Diesel": "2.424 USD/L"},
     "FR": {"SP95-E10": "2.298 USD/L", "Diesel": "2.483 USD/L"},
     "GB": {"Petrol E10": "2.082 USD/L", "Diesel": "2.515 USD/L"},
@@ -4955,27 +4955,36 @@ class OmegaFuel:
 
         for fuel_key, url_path in [("gasoline", "gasoline_prices"), ("diesel", "diesel_prices")]:
             gpp_url = f"https://www.globalpetrolprices.com/{url_path}/"
-            html = None
 
-            if _skey:
-                # ScraperAPI PRIMARY: plain HTML first (1 credit), JS-rendered fallback (5 credits)
-                html = await _fetch_via_scraperapi(gpp_url, "false")
-                if not html:
-                    html = await _fetch_via_scraperapi(gpp_url, "true")
-
-            if not html:
-                # Last resort: Render's own IP — likely blocked, but try anyway
-                html = await _fetch_direct(gpp_url)
-
-            if html:
+            async def _try_parse(html: str) -> int:
+                """Parse html, return number of NEW countries added to result."""
+                before = len(result)
                 try:
                     await _parse_gpp_html(html, fuel_key)
                 except Exception as exc:
                     logger.debug(f"GPP parse error ({fuel_key}): {exc}")
+                return len(result) - before
+
+            added = 0
+            if _skey:
+                h = await _fetch_via_scraperapi(gpp_url, "false")
+                if h:
+                    added = await _try_parse(h)
+                    logger.warning(f"GPP render=false ({fuel_key}): {added} countries parsed")
+                if not added:
+                    h = await _fetch_via_scraperapi(gpp_url, "true")
+                    if h:
+                        added = await _try_parse(h)
+                        logger.warning(f"GPP render=true ({fuel_key}): {added} countries parsed")
+            if not added:
+                h = await _fetch_direct(gpp_url)
+                if h:
+                    added = await _try_parse(h)
+                    logger.warning(f"GPP direct ({fuel_key}): {added} countries parsed")
 
         if result:
-            await cache.set(cache_key, result, ttl=3600 * 12)
-            logger.info(f"GPP listing cached: {len(result)} countries")
+            await cache.set(cache_key, result, ttl=3600 * 4)
+            logger.warning(f"GPP listing cached: {len(result)} countries")
         return result
 
     async def _fetch_us_eia(self) -> dict | None:
